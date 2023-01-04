@@ -2,68 +2,183 @@ use std::mem;
 use std::fs::File;
 use std::path::Path;
 
-use std::io::{BufReader, Read};
+use std::io::{Read};
 use std::io::{Seek, SeekFrom};
+
+use byteorder::{ByteOrder, LittleEndian};
 
 use anyhow::{Context, bail};
 
-const MPQ_HEADER_SIGNATURE: u32 = u32::from_be_bytes(['\x1A' as u8, 'Q' as u8, 'P' as u8, 'M' as u8]);
-const MPQ_HEADER_SIZE: u32 = 32;
-const MPQ_HEADER_VERSION: u16 = 0;
+mod crypto;
+
+use crypto::HashType;
+
+const HEADER_MAGIC: &[u8] = b"MPQ\x1A";
+const HEADER_SIZE: usize = 32;
+const HEADER_VERSION: u16 = 0;
+
+#[derive(Debug)]
+pub struct Archive
+{
+	file: File,
+	header: Header,
+	hash_table: Vec<HashEntry>,
+	block_table: Vec<BlockEntry>,
+}
+
+impl Archive {	
+	pub fn open<P: AsRef<Path>>(path: P)  -> anyhow::Result<Self> {
+		let hash_table_seed = crypto::hash("(hash table)", HashType::FileKey);
+		let block_table_seed = crypto::hash("(block table)", HashType::FileKey);
+
+		let mut file = File::open(path)
+			.context("Failed to open file")?;
+
+		let header = {
+			let mut buffer: [u8; HEADER_SIZE] = [0; HEADER_SIZE];
+			file.seek(SeekFrom::Start(0))
+				.context("Failed to seek")?;
+			file.read_exact(&mut buffer)
+				.context("Failed to read from file")?;
+
+			let h = Header::read(&buffer);
+			h.validate()?;
+			h
+		};
+
+		let hash_table = HashEntry::read_and_decrypt_many(&mut file, 
+			header.hash_table_offset as usize, 
+			header.hash_table_count as usize, 
+			hash_table_seed)?;
+
+		let block_table = BlockEntry::read_and_decrypt_many(&mut file,
+			header.block_table_offset as usize,
+			header.block_table_count as usize,
+			block_table_seed)?;
+
+		Ok(Self {
+			file,
+			header,
+			hash_table,
+			block_table,
+		})
+	}
+
+	pub fn get(&self, filename: &str) -> Option<u32> {
+		let hash_i = crypto::hash(filename, HashType::TableOffset);
+		let hash_a = crypto::hash(filename, HashType::NameA);
+		let hash_b = crypto::hash(filename, HashType::NameB);
+
+		let len = self.header.hash_table_count-1;
+		let start_index = hash_i & len;
+
+		let mut i = start_index;
+		loop {
+			let hash = self.hash_table[i as usize];
+			if hash.hash_a == hash_a && hash.hash_b == hash_b {
+				break;
+			}
+			i = (i + 1) & len;
+			if hash.block_index == 0xFFFFFFFF || i == start_index {
+				return None;
+			}
+		}
+		Some(i)
+	}
+}
+
+trait ByteReadable {
+	fn read(bytes: &[u8]) -> Self;
+	
+	fn read_and_decrypt_many<T: ByteReadable>(file: &mut File, offset: usize, count: usize, seed: u32) -> anyhow::Result<Vec<T>> {
+		let size = count * mem::size_of::<T>();
+		let mut buffer = vec![0x0u8; size];
+
+		file.seek(SeekFrom::Start(offset as u64))
+			.context("Failed to seek")?;
+		file.read_exact(&mut buffer)
+			.context("Failed to read from file")?;
+
+		crypto::decrypt(&mut buffer, seed);
+
+		let mut entries: Vec<T> = Vec::with_capacity(count);
+		for i in 0..count {
+			let start = i as usize * mem::size_of::<T>();
+			entries.push(T::read(&buffer[start..]));
+		}
+		Ok(entries)
+	}
+}
+
 
 #[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-struct FileHeader {
-	signature: u32,
-	size: u32,
+struct Header {
+	magic: [u8; 4],
+	header_size: u32,
 	file_size: u32,
 	version: u16,
 	block_size_factor: u16,
-	hash_entries_offset: u32,
-	block_entries_offset: u32,
-	hash_entries_count: u32,
-	block_entries_count: u32,
+
+	hash_table_offset: u32,
+	block_table_offset: u32,
+	hash_table_count: u32,
+	block_table_count: u32,
 	// __padding: [u8; 72],
 }
 
-impl FileHeader {
-	unsafe fn read_from_buf<R: Read>(reader: &mut BufReader<R>) -> anyhow::Result<Self> {
-		let mut header: Self = mem::zeroed();
-
-		let size = mem::size_of::<Self>();
-		let slice = std::slice::from_raw_parts_mut(&mut header as *mut _ as *mut u8, size);
-		reader
-			.read_exact(slice)
-			.context("Failed to read file header")?;
-		header.validate()?;
-
-		Ok(header)
-	}
-
+impl Header {
 	fn validate(&self) -> anyhow::Result<()> {
-		if self.signature != MPQ_HEADER_SIGNATURE {
-			bail!("MPQ File signature does not match {:?}", MPQ_HEADER_SIGNATURE);
+		if self.magic != HEADER_MAGIC {
+			bail!("MPQ File signature does not match {:?}", HEADER_MAGIC);
 		}
-		if self.size != MPQ_HEADER_SIZE {
-			bail!("MPQ File header size does not match {:?}", MPQ_HEADER_SIZE);
+		if self.header_size != HEADER_SIZE as u32 {
+			bail!("MPQ File header size does not match {:?}", HEADER_SIZE);
 		}
-		if self.version != MPQ_HEADER_VERSION {
-			bail!("MPQ File header version does not match {:?}", MPQ_HEADER_VERSION);
+		if self.version != HEADER_VERSION {
+			bail!("MPQ File header version does not match {:?}", HEADER_VERSION);
 		}
 		Ok(())
 	}
 }
 
-#[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
-struct HashEntry {
-	hash_check: [u32; 2],
-	lcid: u32,
-	block: u32,
+impl ByteReadable for Header {
+	fn read(bytes: &[u8]) -> Self {
+		Self {
+			magic: [bytes[0], bytes[1], bytes[2], bytes[3]],
+			header_size: LittleEndian::read_u32(&bytes[0x04..]),
+			file_size: LittleEndian::read_u32(&bytes[0x08..]),
+			version: LittleEndian::read_u16(&bytes[0x0C..]),
+			block_size_factor: LittleEndian::read_u16(&bytes[0x0E..]),
+			hash_table_offset: LittleEndian::read_u32(&bytes[0x10..]),
+			block_table_offset: LittleEndian::read_u32(&bytes[0x14..]),
+			hash_table_count: LittleEndian::read_u32(&bytes[0x18..]),
+			block_table_count: LittleEndian::read_u32(&bytes[0x1C..]),
+		}
+	}
 }
 
 #[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
+struct HashEntry {
+	hash_a: u32,
+	hash_b: u32,
+	locale: u16,
+	platform: u16,
+	block_index: u32,
+}
+
+impl ByteReadable for HashEntry {
+	fn read(bytes: &[u8]) -> Self {
+		Self {
+			hash_a: LittleEndian::read_u32(bytes),
+			hash_b: LittleEndian::read_u32(&bytes[4..]),
+			locale: LittleEndian::read_u16(&bytes[8..]),
+			platform: LittleEndian::read_u16(&bytes[10..]),
+			block_index: LittleEndian::read_u32(&bytes[12..]),
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
 struct BlockEntry {
 	offset: u32,
 	size_alloc: u32,
@@ -71,62 +186,13 @@ struct BlockEntry {
 	flags: u32,
 }
 
-impl BlockEntry {
-	unsafe fn read_from_buf<R: Read + Seek>(reader: &mut BufReader<R>, header: &FileHeader) -> anyhow::Result<Vec<Self>> {
-		let block_count = header.block_entries_count as usize;
-		let mut blocks: Vec<Self> = Vec::with_capacity(block_count);
-
-		let block_offset = header.block_entries_offset as u64;
-		reader.seek(SeekFrom::Start(block_offset))
-			.context("Failed to seek to block entries")?;
-
-		for _ in 0..block_count {
-			let mut block: Self = mem::zeroed();
-			let size = mem::size_of::<Self>();
-			let slice = std::slice::from_raw_parts_mut(&mut block as *mut _ as *mut u8, size);
-			reader
-				.read_exact(slice)
-				.context("Failed to read block entry")?;
-			blocks.push(block);
+impl ByteReadable for BlockEntry {
+	fn read(bytes: &[u8]) -> Self {
+		Self {
+			offset: LittleEndian::read_u32(bytes),
+			size_alloc: LittleEndian::read_u32(&bytes[4..]),
+			size_file: LittleEndian::read_u32(&bytes[8..]),
+			flags: LittleEndian::read_u32(&bytes[12..]),
 		}
-		Ok(blocks)
 	}
 }
-
-#[derive(Debug)]
-pub struct Mpq {
-	reader: BufReader<File>,
-	header: FileHeader,
-	blocks: Vec<BlockEntry>,
-}
-
-impl Mpq {	
-	pub fn open<P: AsRef<Path>>(path: P)  -> anyhow::Result<Self> {
-		let file = File::open(path)
-			.context("Failed to open file")?;
-		let mut reader = BufReader::new(file);
-		
-		let header = unsafe {
-			FileHeader::read_from_buf(&mut reader)?
-		};
-
-		/*
-		TODO: Decryption
-		let blocks = unsafe {
-			BlockEntry::read_from_buf(&mut reader, &header)?
-		};
-		blocks.iter()
-			.take(10)
-			.for_each(|block| {
-				println!("{:?}", block);
-			});
-		*/
-
-		Ok(Self {
-			reader,
-			header,
-			blocks: Vec::new(),
-		})
-	}
-}
-
