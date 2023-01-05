@@ -1,5 +1,5 @@
 use std::{fs, mem};
-use std::io::{SeekFrom, Seek, Read};
+use std::io::{SeekFrom, Seek, Read, Result};
 
 use bitflags::bitflags;
 
@@ -143,7 +143,7 @@ bitflags! {
 /// Denotes that this hash entry is free (never used)
 pub const BLOCK_INDEX_FREE: u32 = 0xFFFFFFFF;
 /// Denotes that this hash entry has been deleted
-pub const BLOCK_INDEX_DELETED: u32 = 0xFFFFFFFF;
+pub const _BLOCK_INDEX_DELETED: u32 = 0xFFFFFFFF;
 
 /// Entry in the MPQ archive hash table
 #[derive(Debug)]
@@ -233,15 +233,13 @@ impl FileSectors {
         offset: usize,
         size_unpacked: usize,
         sector_size: usize,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         // Get the number of sectors this file takes up
         let sector_count = ((size_unpacked - 1) as usize / sector_size) + 1;
         // Read the sector offsets into a buffer
         let mut buffer = vec![0x0u8; (sector_count + 1) * 4];
-        file.seek(SeekFrom::Start(offset as u64))
-            .context("Failed to seek to file sector")?;
-        file.read_exact(&mut buffer)
-            .context("Failed to read sectors")?;
+        file.seek(SeekFrom::Start(offset as u64))?;
+        file.read_exact(&mut buffer)?;
         // If the block is encrypted, decrypt
         if let Some(key) = file_key {
             crypto::decrypt(&mut buffer, key - 1);

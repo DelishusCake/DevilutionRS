@@ -1,7 +1,7 @@
 use std::fs;
-
 use std::path::Path;
 use std::io::{Read, Seek, SeekFrom};
+use std::io::{Error, ErrorKind, Result};
 
 use anyhow::{bail, Context};
 
@@ -15,12 +15,16 @@ use super::crypto::HashType;
 /// https://github.com/ge0rg/libmpq/blob/master/libmpq/mpq-internal.h
 #[derive(Debug)]
 pub struct Archive {
+    // Archive file handle
     file: fs::File,
-
+    // Byte offset into the file at which the archive was found
     offset: usize,
+    // Size of the sector blocks used to store files
+    // Calculated as 512 << header.block_size_factor
     sector_size: usize,
-
+    // Archive file header
     header: Header,
+    // Lookup tables for files
     hash_table: Vec<HashEntry>,
     block_table: Vec<BlockEntry>,
 }
@@ -87,6 +91,7 @@ impl Archive {
         Ok(File {
             key: file_key,
             block: *block,
+            archive: self,
         })
     }
 
@@ -119,44 +124,48 @@ impl Archive {
 }
 
 #[derive(Debug)]
-pub struct File {
+pub struct File<'a> {
     key: Option<u32>,
     block: BlockEntry,
+    archive: &'a Archive,
 }
 
-impl File {
+impl<'a> File<'a> {
     pub fn size(&self) -> usize {
         self.block.size_unpacked as usize
-    } 
+    }
+}
 
-    pub fn read(&self, archive: &Archive, out: &mut [u8]) -> anyhow::Result<()> {
+impl Read for File<'_> {
+    fn read(&mut self, out: &mut [u8]) -> Result<usize> {
         // Check that the file can be read into the supplied output buffer
         if out.len() < self.block.size_unpacked as usize {
-            bail!("Output buffer not large enough for unpacked file")
+            return Err(Error::new(ErrorKind::InvalidInput, "Output buffer not large enough for unpacked file"));
         }
         // Clone the file handle to keep the archive as immutable
-        let mut file = archive.file
-            .try_clone()
-            .context("Failed to clone file handle for read")?;
+        let mut file = self.archive.file
+            .try_clone()?;
 
         // Get the block and file offset
         let block = &self.block;
-        let offset = archive.offset + block.offset as usize;
+        let offset = self.archive.offset + block.offset as usize;
         // If the file is not compressed
         if !block.is_compressed() {
             // Just read the file directly
-            file.seek(SeekFrom::Start(offset as u64))
-                .context("Failed to seek to file start")?;
-            file.read_exact(out)
-                .context("Failed to read to output buffer")?;
-            Ok(())
+            file.seek(SeekFrom::Start(offset as u64))?;
+            file.read_exact(out)?;
+            Ok(self.block.size_unpacked as usize)
         } else {
             // Allocate a sector-sized buffer to read into
-            let mut buffer = vec![0x0u8; archive.sector_size];
+            let mut buffer = vec![0x0u8; self.archive.sector_size];
             // Keep track of the number of bytes written
             let mut bytes_written = 0usize;
             // Get the sectors that this file is stored in
-            let sectors = FileSectors::get(&mut file, self.key, offset, self.block.size_unpacked as usize, archive.sector_size)?;
+            let sectors = FileSectors::get(
+                &mut file, self.key, 
+                offset, self.block.size_unpacked as usize, 
+                self.archive.sector_size
+            )?;
             for (index, sector) in sectors.enumerate() {
                 // Decompose the sector into it's offset and size
                 let (sector_offset, sector_size) = sector;
@@ -164,12 +173,10 @@ impl File {
                 let output: &mut [u8] = &mut out[bytes_written..];
                 let mut input: &mut [u8] = &mut buffer[0..sector_size];
                 // Get the offset into the archive for this sector
-                let offset = archive.offset + (block.offset as usize) + sector_offset;
+                let offset = self.archive.offset + (block.offset as usize) + sector_offset;
                 // Read the sector into the input buffer
-                file.seek(SeekFrom::Start(offset as u64))
-                    .context("Failed to seek to sector start")?;
-                file.read_exact(input)
-                    .context("Failed to read to buffer")?;
+                file.seek(SeekFrom::Start(offset as u64))?;
+                file.read_exact(input)?;
                 // If the sector is encrypted, decrypt it
                 if let Some(key) = self.key {
                     crypto::decrypt(&mut input, key + index as u32);
@@ -181,7 +188,7 @@ impl File {
                     bytes_written += compression::decompress_into(input, output)?;
                 }
             }
-            Ok(())
+            Ok(bytes_written)
         }
     }
 }
