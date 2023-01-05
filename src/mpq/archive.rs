@@ -1,5 +1,5 @@
+use std::fs;
 use std::mem;
-use std::fs::File;
 use std::path::Path;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -9,45 +9,21 @@ use byteorder::{ByteOrder, LittleEndian};
 
 use anyhow::{bail, Context};
 
-use super::crypto;
+use super::{crypto, compression};
 use super::crypto::HashType;
 
 /// NOTE: Big thanks to the libmpq library by ge0rg
 /// https://github.com/ge0rg/libmpq/blob/master/libmpq/mpq-internal.h
 
-/// Magic number for the MPQ A file marker
-const HEADER_MAGIC: &[u8] = b"MPQ\x1A";
-/// The header size will always be the same
-const HEADER_SIZE: usize = 32;
-/// Diablo 1 uses version 0
-const HEADER_VERSION: u16 = 0;
-
-bitflags! {
-    /// Bit flags for file block entries
-    struct BlockFlags : u32 {
-        /// Marker that this file exists
-        const EXISTS    = 0x80000000;
-        /// Marker that this file is encrypted
-        const ENCRYPTED = 0x00010000;
-        /// Marker that this file uses PkWare data compression
-        const COMPRESS_IMPLODE = 0x00000100;
-        /// Marker that this file uses multiple compressions
-        const COMPRESS_MULTI = 0x00000200;
-        /// Single sector file storage
-        /// Probably not used in Diablo, first appeared in WOW
-        const SINGLE = 0x01000000;
-    }
-}
-
 /// MPQ data archive
-/// This is the data archive format used by Blizzard, first starting in Diablo
-/// It utilizes a linearly-probed hash table for indirect file lookup in the archive itself
+/// This is *not* intended as a complete implementation of the MPQ file format,
+/// just usable enough for this project
 #[derive(Debug)]
 pub struct Archive {
-    file: File,
+    file: fs::File,
 
-    block_size: usize,
-    archive_offset: usize,
+    sector_size: usize,
+    offset: usize,
 
     header: Header,
     hash_table: Vec<HashEntry>,
@@ -60,12 +36,12 @@ impl Archive {
         let hash_table_seed = crypto::hash("(hash table)", HashType::FileKey);
         let block_table_seed = crypto::hash("(block table)", HashType::FileKey);
         // Open the file from the path
-        let mut file = File::open(path).context("Failed to open file")?;
+        let mut file = fs::File::open(path).context("Failed to open file")?;
         // Read and validate the header
         // If the header is not present (or is invalid), there's no need to proceed
-        let (header, archive_offset) = Header::find_in_file(&mut file)?;
-        // Calculate the block size
-        let block_size = 512 << header.block_size_factor;
+        let (header, offset) = Header::find_in_file(&mut file)?;
+        // Calculate the size of block sectors
+        let sector_size = 512 << header.block_size_factor;
         // Read and decrypt the hash table
         let hash_table = HashEntry::read_and_decrypt_many(
             &mut file,
@@ -83,8 +59,8 @@ impl Archive {
 
         Ok(Self {
             file,
-            archive_offset,
-            block_size,
+            offset,
+            sector_size,
             header,
             hash_table,
             block_table,
@@ -93,6 +69,33 @@ impl Archive {
 
     pub fn has_file(&self, filename: &str) -> bool {
         self.get_block_index(filename).is_some()
+    }
+
+    pub fn get_file(&self, filename: &str) -> anyhow::Result<File> {
+        // Get the block index for the file
+        let block_index = self.get_block_index(filename)
+            .context("Failed to get block for file")?;
+        // Get the block
+        let block = &self.block_table[block_index as usize];
+        if (block.flags & BlockFlags::EXISTS).is_empty() {
+            bail!("File block is marked as non-existant")
+        }
+        // If the file is encrypted, get the encryption key
+        let file_key = if !(block.flags & BlockFlags::ENCRYPTED).is_empty() {
+            let filename = filename.split(&['\\', '/'][..])
+                .last()
+                .context("Failed to extract filename from path")?;
+            crypto::hash(filename, HashType::FileKey)
+        } else {
+            0
+        };
+
+        Ok(File {
+            key: file_key,
+            size_unpacked: block.size_unpacked as usize,
+            size_packed: block.size_packed as usize,
+            block_index,
+        })
     }
 
     fn get_block_index(&self, filename: &str) -> Option<usize> {
@@ -110,8 +113,6 @@ impl Archive {
             // If the hashes match, return the table index
             let hash = &self.hash_table[i as usize];
             if hash.hash_a == hash_a && hash.hash_b == hash_b {
-                let block = &self.block_table[hash.block_index as usize];
-                println!("{:?}", block);
                 return Some(hash.block_index as usize);
             }
             // No match found, iterate
@@ -125,6 +126,83 @@ impl Archive {
     }
 }
 
+#[derive(Debug)]
+pub struct File {
+    key: u32,
+    size_unpacked: usize,
+    size_packed: usize,
+    block_index: usize,
+}
+
+impl File {
+    pub fn size(&self) -> usize {
+        self.size_unpacked
+    } 
+
+    pub fn read(&self, archive: &Archive, out: &mut [u8]) -> anyhow::Result<usize> {
+        // Check that the file can be read into the supplied output buffer
+        if out.len() < self.size_unpacked {
+            bail!("Output buffer not large enough for unpacked file")
+        }
+        // Clone the file handle to keep the archive as immutable
+        let mut file = archive.file
+            .try_clone()
+            .context("Failed to clone file handle for read")?;
+
+        // Get the block and file offset
+        let block = &archive.block_table[self.block_index];
+        let offset = archive.offset + block.offset as usize;
+        // If the file is not compressed
+        if (block.flags & BlockFlags::ANY_COMPRESSION).is_empty() {
+            // Just read the file directly
+            file.seek(SeekFrom::Start(offset as u64))
+                .context("Failed to seek to file start")?;
+            file.read_exact(out)
+                .context("Failed to read to output buffer")?;
+            Ok(self.size_unpacked)
+        } else {
+            // Allocate a sector-sized buffer to read into
+            let mut buffer = vec![0x0u8; archive.sector_size];
+            // Keep track of the number of bytes written
+            let mut bytes_written = 0usize;
+            // Get the sectors that this file is stored in
+            let sectors = FileSectors::get(&mut file, self.key, offset, self.size_unpacked, archive.sector_size)?;
+            for (index, sector) in sectors.enumerate() {
+                // Decompose the sector into it's offset and size
+                let (sector_offset, sector_size) = sector;
+                // Get the input and output buffers
+                let output: &mut [u8] = &mut out[bytes_written..];
+                let mut input: &mut [u8] = &mut buffer[0..sector_size];
+                // Get the offset into the archive for this sector
+                let offset = archive.offset + (block.offset as usize) + sector_offset;
+                // Read the sector into the input buffer
+                file.seek(SeekFrom::Start(offset as u64))
+                    .context("Failed to seek to sector start")?;
+                file.read_exact(input)
+                    .context("Failed to read to buffer")?;
+                // If the sector is encrypted, decrypt it
+                if !(block.flags & BlockFlags::ENCRYPTED).is_empty() {
+                    crypto::decrypt(&mut input, self.key + index as u32);
+                }
+                // Decompression
+                if !(block.flags & BlockFlags::COMPRESS_PKWARE).is_empty() {
+                    bytes_written += compression::explode_into(input, output)?;
+                } else if !(block.flags & BlockFlags::COMPRESS_MULTI).is_empty() {
+                    todo!()
+                }
+            }
+            Ok(bytes_written)
+        }
+    }
+}
+
+/// Magic number for the MPQ A file marker
+const HEADER_MAGIC: &[u8] = b"MPQ\x1A";
+/// The header size will always be the same
+const HEADER_SIZE: usize = 32;
+/// Diablo 1 uses version 0
+const HEADER_VERSION: u16 = 0;
+
 /// Denotes a type that can be read from a byte array
 trait ByteReadable {
     /// Initialize an instance from a byte array
@@ -135,7 +213,7 @@ trait ByteReadable {
     /// Count is the number of instances to read
     /// Seed is the decryption key
     fn read_and_decrypt_many<T: ByteReadable>(
-        file: &mut File,
+        file: &mut fs::File,
         offset: usize,
         count: usize,
         seed: u32,
@@ -177,7 +255,7 @@ struct Header {
 
 impl Header {
     /// Try to find the MPQ header and it's offset in the file
-    fn find_in_file(file: &mut File) -> anyhow::Result<(Self, usize)> {
+    fn find_in_file(file: &mut fs::File) -> anyhow::Result<(Self, usize)> {
         // Get the size of the file
         let archive_size = file.metadata()
             .context("Failed to get file metadata")?
@@ -224,6 +302,25 @@ impl ByteReadable for Header {
             hash_table_count: LittleEndian::read_u32(&bytes[0x18..]),
             block_table_count: LittleEndian::read_u32(&bytes[0x1C..]),
         }
+    }
+}
+
+bitflags! {
+    /// Bit flags for file block entries
+    struct BlockFlags : u32 {
+        /// Marker that this file exists
+        const EXISTS    = 0x80000000;
+        /// Marker that this file is encrypted
+        const ENCRYPTED = 0x00010000;
+        /// Marker that this file uses PkWare data compression
+        const COMPRESS_PKWARE = 0x00000100;
+        /// Marker that this file uses multiple compressions
+        const COMPRESS_MULTI = 0x00000200;
+        /// Single sector file storage
+        /// Probably not used in Diablo, first appeared in WOW
+        const SINGLE = 0x01000000;
+
+        const ANY_COMPRESSION = Self::COMPRESS_PKWARE.bits | Self::COMPRESS_MULTI.bits;
     }
 }
 
@@ -280,6 +377,64 @@ impl ByteReadable for BlockEntry {
             size_packed: LittleEndian::read_u32(&bytes[4..]),
             size_unpacked: LittleEndian::read_u32(&bytes[8..]),
             flags: BlockFlags{ bits: LittleEndian::read_u32(&bytes[12..]) },
+        }
+    }
+}
+
+/// Iterator for the sectors that contain a file
+/// This iterator returns (offset, size) tuples
+#[derive(Debug)]
+struct FileSectors {
+    index: usize,
+    offsets: Vec<u32>,
+}
+
+impl FileSectors {
+    fn get(
+        file: &mut fs::File, 
+        file_key: u32,
+        offset: usize,
+        size_unpacked: usize,
+        sector_size: usize,
+    ) -> anyhow::Result<Self> {
+        // Get the number of sectors this file takes up
+        let sector_count = ((size_unpacked - 1) as usize / sector_size) + 1;
+        // Read the sector offsets into a buffer
+        let mut buffer = vec![0x0u8; (sector_count + 1) * 4];
+        file.seek(SeekFrom::Start(offset as u64))
+            .context("Failed to seek to file sector")?;
+        file.read_exact(&mut buffer)
+            .context("Failed to read sectors")?;
+        // If the block is encrypted, decrypt
+        if file_key != 0 {
+            crypto::decrypt(&mut buffer, file_key - 1);
+        }
+        // Map the sectors into u32s
+        let mut offsets: Vec<u32> = Vec::with_capacity(sector_count+1);
+        for i in 0..=sector_count {
+            offsets.push(LittleEndian::read_u32(&buffer[i*4..]));
+        }
+
+        Ok(Self {
+            index: 0,
+            offsets,
+        })
+    }
+}
+
+impl Iterator for FileSectors {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < (self.offsets.len() - 1) {
+            let offset = self.offsets[self.index] as usize;
+            let size = self.offsets[self.index + 1] as usize - offset;
+
+            self.index += 1;
+
+            Some((offset, size))
+        } else {
+            None
         }
     }
 }

@@ -201,7 +201,8 @@ pub fn decrypt(block: &mut [u8], seed: u32) {
     let mut seed_1 = Wrapping(seed);
     let mut seed_2 = Wrapping(0xEEEEEEEE);
     // Iterate over the buffer by DWORDS
-    for i in (0..block.len()).step_by(4) {
+    let mut i = 0;
+    while i < block.len() - 3 {
         // Increment the seed by the value in the crypt table
         seed_2 += CRYPT_BUF[(Wrapping(0x400) + (seed_1 & Wrapping(0xFF))).0 as usize];
 
@@ -217,6 +218,7 @@ pub fn decrypt(block: &mut [u8], seed: u32) {
         // Unwrap the value and store in the buffer
         let value = value.0;
         LittleEndian::write_u32(&mut block[i..], value);
+        i += 4;
     }
 }
 
