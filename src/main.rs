@@ -5,11 +5,8 @@ fn main() {
     
     let lvl1 = mpq.get_file("levels\\l1data\\l1.min")
         .expect("Failed to get file handle");
-    println!("{:?}", lvl1);
 
     let mut data = vec![0x0u8; lvl1.size()];
-
-    let bytes_read = lvl1.read(&mpq, &mut data)
-        .expect("Failed to read file contents");
-    println!("{} {:?}", bytes_read, data);
+    lvl1.read(&mpq, &mut data).expect("Failed to read file contents");
+    println!("Read {:?} bytes from file", data.len());
 }

@@ -12,12 +12,10 @@ use anyhow::{bail, Context};
 use super::{crypto, compression};
 use super::crypto::HashType;
 
+/// MPQ data archive
+/// This is *not* intended as a complete implementation of the MPQ file format, just usable enough for this project
 /// NOTE: Big thanks to the libmpq library by ge0rg
 /// https://github.com/ge0rg/libmpq/blob/master/libmpq/mpq-internal.h
-
-/// MPQ data archive
-/// This is *not* intended as a complete implementation of the MPQ file format,
-/// just usable enough for this project
 #[derive(Debug)]
 pub struct Archive {
     file: fs::File,
@@ -72,29 +70,26 @@ impl Archive {
     }
 
     pub fn get_file(&self, filename: &str) -> anyhow::Result<File> {
-        // Get the block index for the file
-        let block_index = self.get_block_index(filename)
-            .context("Failed to get block for file")?;
         // Get the block
-        let block = &self.block_table[block_index as usize];
-        if (block.flags & BlockFlags::EXISTS).is_empty() {
+        let block = self.get_block_index(filename)
+            .and_then(|index| Some(&self.block_table[index as usize]))
+            .context("Failed to get block for file")?;
+        if !block.exists() {
             bail!("File block is marked as non-existant")
         }
         // If the file is encrypted, get the encryption key
-        let file_key = if !(block.flags & BlockFlags::ENCRYPTED).is_empty() {
+        let file_key = if block.is_encrypted() {
             let filename = filename.split(&['\\', '/'][..])
                 .last()
                 .context("Failed to extract filename from path")?;
-            crypto::hash(filename, HashType::FileKey)
+            Some(crypto::hash(filename, HashType::FileKey))
         } else {
-            0
+            None
         };
 
         Ok(File {
             key: file_key,
-            size_unpacked: block.size_unpacked as usize,
-            size_packed: block.size_packed as usize,
-            block_index,
+            block: *block,
         })
     }
 
@@ -128,20 +123,18 @@ impl Archive {
 
 #[derive(Debug)]
 pub struct File {
-    key: u32,
-    size_unpacked: usize,
-    size_packed: usize,
-    block_index: usize,
+    key: Option<u32>,
+    block: BlockEntry,
 }
 
 impl File {
     pub fn size(&self) -> usize {
-        self.size_unpacked
+        self.block.size_unpacked as usize
     } 
 
-    pub fn read(&self, archive: &Archive, out: &mut [u8]) -> anyhow::Result<usize> {
+    pub fn read(&self, archive: &Archive, out: &mut [u8]) -> anyhow::Result<()> {
         // Check that the file can be read into the supplied output buffer
-        if out.len() < self.size_unpacked {
+        if out.len() < self.block.size_unpacked as usize {
             bail!("Output buffer not large enough for unpacked file")
         }
         // Clone the file handle to keep the archive as immutable
@@ -150,23 +143,23 @@ impl File {
             .context("Failed to clone file handle for read")?;
 
         // Get the block and file offset
-        let block = &archive.block_table[self.block_index];
+        let block = &self.block;
         let offset = archive.offset + block.offset as usize;
         // If the file is not compressed
-        if (block.flags & BlockFlags::ANY_COMPRESSION).is_empty() {
+        if !block.is_compressed() {
             // Just read the file directly
             file.seek(SeekFrom::Start(offset as u64))
                 .context("Failed to seek to file start")?;
             file.read_exact(out)
                 .context("Failed to read to output buffer")?;
-            Ok(self.size_unpacked)
+            Ok(())
         } else {
             // Allocate a sector-sized buffer to read into
             let mut buffer = vec![0x0u8; archive.sector_size];
             // Keep track of the number of bytes written
             let mut bytes_written = 0usize;
             // Get the sectors that this file is stored in
-            let sectors = FileSectors::get(&mut file, self.key, offset, self.size_unpacked, archive.sector_size)?;
+            let sectors = FileSectors::get(&mut file, self.key, offset, self.block.size_unpacked as usize, archive.sector_size)?;
             for (index, sector) in sectors.enumerate() {
                 // Decompose the sector into it's offset and size
                 let (sector_offset, sector_size) = sector;
@@ -181,17 +174,17 @@ impl File {
                 file.read_exact(input)
                     .context("Failed to read to buffer")?;
                 // If the sector is encrypted, decrypt it
-                if !(block.flags & BlockFlags::ENCRYPTED).is_empty() {
-                    crypto::decrypt(&mut input, self.key + index as u32);
+                if let Some(key) = self.key {
+                    crypto::decrypt(&mut input, key + index as u32);
                 }
-                // Decompression
-                if !(block.flags & BlockFlags::COMPRESS_PKWARE).is_empty() {
+                // Apply decompression 
+                if block.is_imploded() {
                     bytes_written += compression::explode_into(input, output)?;
-                } else if !(block.flags & BlockFlags::COMPRESS_MULTI).is_empty() {
-                    todo!()
+                } else if block.has_muli_compression() {
+                    bytes_written += compression::decompress_into(input, output)?;
                 }
             }
-            Ok(bytes_written)
+            Ok(())
         }
     }
 }
@@ -218,19 +211,22 @@ trait ByteReadable {
         count: usize,
         seed: u32,
     ) -> anyhow::Result<Vec<T>> {
+        // Allocate a buffer large enough to hold all entries
         let size = count * mem::size_of::<T>();
         let mut buffer = vec![0x0u8; size];
-
+        // Seek and read from the file handle
         file.seek(SeekFrom::Start(offset as u64))
             .context("Failed to seek")?;
         file.read_exact(&mut buffer)
             .context("Failed to read from file")?;
-
+        // Decrypt the buffer contents
         crypto::decrypt(&mut buffer, seed);
-
+        // Map the buffer contents into a vector
         let mut entries: Vec<T> = Vec::with_capacity(count);
         for i in 0..count {
+            // Calculate the start of this entry
             let start = i as usize * mem::size_of::<T>();
+            // Read the buffer contents into a new instance, push to the entries vector
             entries.push(T::read(&buffer[start..]));
         }
         Ok(entries)
@@ -332,7 +328,6 @@ const _BLOCK_INDEX_DELETED: u32 = 0xFFFFFFFF;
 /// Entry in the MPQ archive hash table
 #[derive(Debug)]
 struct HashEntry {
-
     // Filename hashes
     hash_a: u32,
     hash_b: u32,
@@ -363,7 +358,7 @@ struct BlockEntry {
     // Byte offset of the file from the start of the archive
     offset: u32,
     // Compressed size of the file, in bytes
-    size_packed: u32,
+    _size_packed: u32,
     // Uncompressed size of the file, in bytes
     size_unpacked: u32,
     // Flags
@@ -374,10 +369,32 @@ impl ByteReadable for BlockEntry {
     fn read(bytes: &[u8]) -> Self {
         Self {
             offset: LittleEndian::read_u32(bytes),
-            size_packed: LittleEndian::read_u32(&bytes[4..]),
+            _size_packed: LittleEndian::read_u32(&bytes[4..]),
             size_unpacked: LittleEndian::read_u32(&bytes[8..]),
             flags: BlockFlags{ bits: LittleEndian::read_u32(&bytes[12..]) },
         }
+    }
+}
+
+impl BlockEntry {
+    fn exists(&self) -> bool {
+        !(self.flags & BlockFlags::EXISTS).is_empty()
+    }
+
+    fn is_compressed(&self) -> bool {
+        !(self.flags & BlockFlags::ANY_COMPRESSION).is_empty()
+    }
+
+    fn is_imploded(&self) -> bool {
+        !(self.flags & BlockFlags::COMPRESS_PKWARE).is_empty()
+    }
+
+    fn is_encrypted(&self) -> bool {
+        !(self.flags & BlockFlags::ENCRYPTED).is_empty()
+    }
+
+    fn has_muli_compression(&self) -> bool {
+        !(self.flags & BlockFlags::COMPRESS_MULTI).is_empty()
     }
 }
 
@@ -392,7 +409,7 @@ struct FileSectors {
 impl FileSectors {
     fn get(
         file: &mut fs::File, 
-        file_key: u32,
+        file_key: Option<u32>,
         offset: usize,
         size_unpacked: usize,
         sector_size: usize,
@@ -406,8 +423,8 @@ impl FileSectors {
         file.read_exact(&mut buffer)
             .context("Failed to read sectors")?;
         // If the block is encrypted, decrypt
-        if file_key != 0 {
-            crypto::decrypt(&mut buffer, file_key - 1);
+        if let Some(key) = file_key {
+            crypto::decrypt(&mut buffer, key - 1);
         }
         // Map the sectors into u32s
         let mut offsets: Vec<u32> = Vec::with_capacity(sector_count+1);
