@@ -1,5 +1,3 @@
-use std::num::Wrapping;
-
 use byteorder::{ByteOrder, LittleEndian};
 
 const CRYPT_BUF: [u32; 0x500] = [
@@ -181,42 +179,46 @@ pub fn hash(string: &str, hash_type: HashType) -> u32 {
         HashType::NameB => 0x200,
         HashType::FileKey => 0x300,
     };
-    // Initialize the seeds as wrapping u32s
-    let mut seed_1 = Wrapping(0x7FED7FED);
-    let mut seed_2 = Wrapping(0xEEEEEEEE);
+    // Initialize the seeds
+    let mut seed_1 = 0x7FED7FEDu32;
+    let mut seed_2 = 0xEEEEEEEEu32;
     // Hash the string
-    for c in string.replace("/", "\\").chars() {
+    for c in string.chars() {
         // Convert the char to it's uppercase form
         let c = c.to_ascii_uppercase();
         // Increment the seeds
-        seed_1 = Wrapping(CRYPT_BUF[offset + c as usize]) ^ (seed_1 + seed_2);
-        seed_2 = Wrapping(c as u32) + seed_1 + seed_2 + (seed_2 << 5) + Wrapping(3);
+        seed_1 = (CRYPT_BUF[offset + c as usize]) ^ seed_1.wrapping_add(seed_2);
+        seed_2 = (c as u32)
+            .wrapping_add(seed_1)
+            .wrapping_add(seed_2)
+            .wrapping_add(seed_2 << 5)
+            .wrapping_add(3);
     }
-    // Unwrap the hashed value
-    seed_1.0
+    // Return the hashed value
+    seed_1
 }
 
 pub fn decrypt(block: &mut [u8], seed: u32) {
-    // Initialize the seeds as wrapping u32s
-    let mut seed_1 = Wrapping(seed);
-    let mut seed_2 = Wrapping(0xEEEEEEEE);
+    // Initialize the seeds
+    let mut seed_1 = seed;
+    let mut seed_2 = 0xEEEEEEEEu32;
     // Iterate over the buffer by DWORDS
     let mut i = 0;
     while i < block.len() - 3 {
         // Increment the seed by the value in the crypt table
-        seed_2 += CRYPT_BUF[(Wrapping(0x400) + (seed_1 & Wrapping(0xFF))).0 as usize];
-
-        // Convert the bytes (in little endian order) into a wrapping u32
-        let value = Wrapping(LittleEndian::read_u32(&block[i..]));
+        seed_2 = seed_2.wrapping_add(CRYPT_BUF[0x400u32.wrapping_add(seed_1 & 0xFF) as usize]);
+        // Convert the bytes (in little endian order) into a u32
+        let value = LittleEndian::read_u32(&block[i..]);
         // Decrypt the value
-        let value = value ^ (seed_1 + seed_2);
+        let value = value ^ seed_1.wrapping_add(seed_2);
+        // Increment the seed values
+        seed_1 = ((!seed_1 << 0x15).wrapping_add(0x11111111)) | (seed_1 >> 0x0B);
+        seed_2 = value
+            .wrapping_add(seed_2)
+            .wrapping_add(seed_2 << 5)
+            .wrapping_add(3);
 
-        // Incrrement the seed values
-        seed_1 = ((!seed_1 << 0x15) + Wrapping(0x11111111)) | (seed_1 >> 0x0B);
-        seed_2 = value + seed_2 + (seed_2 << 5) + Wrapping(3);
-
-        // Unwrap the value and store in the buffer
-        let value = value.0;
+        // Store in the buffer
         LittleEndian::write_u32(&mut block[i..], value);
         i += 4;
     }
