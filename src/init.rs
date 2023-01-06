@@ -1,11 +1,13 @@
-use std::ffi::{c_void, CString};
-
 use glfw::{WindowHint, OpenGlProfileHint};
 
 use anyhow::Context;
 
-use crate::gfx::Image;
 use crate::mpq::Archive;
+
+use crate::gfx::Image;
+
+use crate::gfx::{Bindable, Topology, Format, Filtering};
+use crate::gfx::{Shader, Pipeline, VertexArray, Texture};
 
 pub const TITLE: &str = "Diablo";
 pub const SCREEN_WIDTH: u32 = 640;
@@ -75,7 +77,7 @@ impl App {
         glfw.window_hint(WindowHint::DoubleBuffer(true));
         glfw.window_hint(WindowHint::ContextVersion(3, 3));
         glfw.window_hint(WindowHint::OpenGlForwardCompat(true));
-        // glfw.window_hint(WindowHint::OpenGlDebugContext(cfg!(debug_assertions)));
+        glfw.window_hint(WindowHint::OpenGlDebugContext(cfg!(debug_assertions)));
         glfw.window_hint(WindowHint::OpenGlProfile(OpenGlProfileHint::Core));
         
         let (mut window, _events) = glfw
@@ -87,66 +89,31 @@ impl App {
 
         gl::load_with(|s| glfw.get_proc_address_raw(s));
 
-        let vertex_shader = unsafe {
-            let shader_str = CString::new(VERTEX_SHADER.as_bytes())?;
-            let shader = gl::CreateShader(gl::VERTEX_SHADER);
-            gl::ShaderSource(shader, 1, &shader_str.as_ptr(), std::ptr::null());
-            gl::CompileShader(shader);
-            shader
-        };
+        let vertex_shader = Shader::vertex(VERTEX_SHADER, None)?;
+        let fragment_shader = Shader::fragment(FRAGMENT_SHADER, None)?;
 
-        let fragment_shader = unsafe {
-            let shader_str = CString::new(FRAGMENT_SHADER.as_bytes())?;
-            let shader = gl::CreateShader(gl::FRAGMENT_SHADER);
-            gl::ShaderSource(shader, 1, &shader_str.as_ptr(), std::ptr::null());
-            gl::CompileShader(shader);
-            shader
-        };
+        let pipeline = Pipeline::new(Topology::Triangles, &[ &vertex_shader, &fragment_shader ])?;
 
-        let program = unsafe {
-            let program = gl::CreateProgram();
-            gl::AttachShader(program, vertex_shader);
-            gl::AttachShader(program, fragment_shader);
-            gl::LinkProgram(program);
-            program
-        };
+        let vertex_array = VertexArray::new();
 
-        let vbo = unsafe {
-            let mut buf = 0;
-            gl::GenBuffers(1, &mut buf);
-            gl::BindBuffer(gl::ARRAY_BUFFER, buf);
-            gl::BufferData(gl::ARRAY_BUFFER, 0, std::ptr::null(), gl::STATIC_DRAW);
-            gl::BindBuffer(gl::ARRAY_BUFFER, 0);
-            buf
-        };
-
-        let vao = unsafe {
-            let mut vao = 0;
-            gl::GenVertexArrays(1, &mut vao);
-            vao
-        };
-
-        let tex_handle = unsafe {
+        let texture = {
             let title_file = self.mpq.get_file("ui_art\\title.pcx")?;
             let title_image = Image::read_pcx(&title_file, None)?;
 
-            let mut handle = 0u32;
-            gl::GenTextures(1, &mut handle as *mut u32);
-            gl::BindTexture(gl::TEXTURE_2D, handle);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
-            gl::TexImage2D(gl::TEXTURE_2D, 
-                0, gl::RGBA as i32, title_image.width as i32, title_image.height as i32, 
-                0, gl::RGBA as u32, gl::UNSIGNED_BYTE, title_image.pixels.as_ptr() as *const c_void);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-
-            handle
+            Texture::new(
+                title_image.width, 
+                title_image.height, 
+                Format::R8g8b8a8_uint, 
+                Filtering::Nearest,
+                &title_image.pixels)?
         };
 
+        /*
         let tex_location = unsafe {
             let location = CString::new("u_texture".as_bytes())?;
             gl::GetUniformLocation(program, location.as_ptr())
         };
+        */
 
         while !window.should_close() {
             unsafe {
@@ -163,22 +130,20 @@ impl App {
                 gl::Scissor(0, 0, SCREEN_WIDTH as i32, SCREEN_HEIGHT as i32);
 
                 gl::Clear(gl::COLOR_BUFFER_BIT);
-                gl::UseProgram(program);
+                
+                pipeline.bind();
                 {
-                    gl::Uniform1i(tex_location, 0);
+                    // gl::Uniform1i(tex_location, 0);
                     
-                    gl::ActiveTexture(gl::TEXTURE0);
-                    gl::BindTexture(gl::TEXTURE_2D, tex_handle);
+                    texture.bind_at(0);
                     {
-                        gl::BindVertexArray(vao);
-                        gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+                        vertex_array.bind();
                         gl::DrawArrays(gl::TRIANGLES, 0i32, 3i32);
-                        gl::BindBuffer(gl::ARRAY_BUFFER, 0);
-                        gl::BindVertexArray(0);
+                        vertex_array.unbind();
                     }
-                    gl::BindTexture(gl::TEXTURE_2D, 0);
+                    texture.unbind();
                 }
-                gl::UseProgram(0);
+                pipeline.unbind();
             }
 
             window.swap_buffers();
