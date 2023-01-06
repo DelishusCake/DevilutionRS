@@ -185,45 +185,4 @@ impl<'a> File<'a> {
             Ok(bytes_written)
         }
     }
-
-    // TODO: Move this somewhere else
-    pub fn read_as_pcx(&self) -> Result<(usize, usize, Vec<u8>)> {
-        let mut buffer = vec![0x0u8; self.size()];
-        self.read(&mut buffer)?;
-
-        let mut reader = pcx::Reader::new(Cursor::new(buffer))?;
-
-        let bpp = 3;
-        let (width, height) = reader.dimensions();
-        let size = width as usize * height as usize * bpp;
-        
-        let mut data = vec![0x0u8; size as usize];
-        if reader.is_paletted() {
-            let mut image: Vec<Vec<u8>> = Vec::with_capacity(height as usize);
-            for _y in 0..height {
-                let mut row = vec![0x0u8; width as usize];
-                reader.next_row_paletted(&mut row)?;
-                image.push(row);
-            }
-
-            let mut pallete = vec![0x0u8; 256*3];
-            if let Some(_len) = reader.palette_length() {
-                reader.read_palette(&mut pallete)?;
-            }
-
-            let mut offset = 0usize;
-            for y in 0..height {
-                for x in 0..width {
-                    let i = image[height as usize - y as usize - 1][x as usize] as usize;
-                    data[offset + 0] = pallete[i*3 + 0];
-                    data[offset + 1] = pallete[i*3 + 1];
-                    data[offset + 2] = pallete[i*3 + 2];
-                    offset += bpp as usize;
-                }
-            }
-        } else {
-            todo!()
-        }
-        Ok((width as usize, height as usize, data))
-    }
 }

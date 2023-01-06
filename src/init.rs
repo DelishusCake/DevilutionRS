@@ -4,6 +4,7 @@ use glfw::{WindowHint, OpenGlProfileHint};
 
 use anyhow::Context;
 
+use crate::gfx::Image;
 use crate::mpq::Archive;
 
 pub const TITLE: &str = "Diablo";
@@ -45,8 +46,7 @@ uniform sampler2D u_texture;
 
 void main()
 {
-    vec4 c = texture(u_texture, fs_in.uv);
-    o_frag = vec4(c.rgb, 1.0);
+    o_frag = texture(u_texture, fs_in.uv);
 }
 "#;
 
@@ -127,8 +127,8 @@ impl App {
         };
 
         let tex_handle = unsafe {
-            let title = self.mpq.get_file("ui_art\\title.pcx")?;
-            let (width, height, data) = title.read_as_pcx()?;
+            let title_file = self.mpq.get_file("ui_art\\title.pcx")?;
+            let title_image = Image::read_pcx(&title_file, None)?;
 
             let mut handle = 0u32;
             gl::GenTextures(1, &mut handle as *mut u32);
@@ -136,20 +136,32 @@ impl App {
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
             gl::TexImage2D(gl::TEXTURE_2D, 
-                0, gl::RGB as i32, width as i32, height as i32, 
-                0, gl::RGB as u32, gl::UNSIGNED_BYTE, data.as_ptr() as *const c_void);
+                0, gl::RGBA as i32, title_image.width as i32, title_image.height as i32, 
+                0, gl::RGBA as u32, gl::UNSIGNED_BYTE, title_image.pixels.as_ptr() as *const c_void);
             gl::BindTexture(gl::TEXTURE_2D, 0);
 
             handle
         };
 
-        let tex_location  = unsafe {
+        let tex_location = unsafe {
             let location = CString::new("u_texture".as_bytes())?;
             gl::GetUniformLocation(program, location.as_ptr())
         };
 
         while !window.should_close() {
             unsafe {
+                gl::Enable(gl::SCISSOR_TEST);
+                gl::Disable(gl::CULL_FACE);
+
+                gl::Enable(gl::FRAMEBUFFER_SRGB);
+
+                gl::Enable(gl::BLEND);
+                gl::BlendEquation(gl::FUNC_ADD);
+                gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+
+                gl::Viewport(0, 0, SCREEN_WIDTH as i32, SCREEN_HEIGHT as i32);
+                gl::Scissor(0, 0, SCREEN_WIDTH as i32, SCREEN_HEIGHT as i32);
+
                 gl::Clear(gl::COLOR_BUFFER_BIT);
                 gl::UseProgram(program);
                 {
