@@ -1,9 +1,7 @@
 use std::fs;
 use std::path::Path;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Cursor};
 use std::io::{Error, ErrorKind, Result};
-
-use anyhow::{bail, Context};
 
 use super::header::*;
 use super::{crypto, compression};
@@ -30,12 +28,12 @@ pub struct Archive {
 }
 
 impl Archive {
-    pub fn open<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         // Hash the seeds for the archive tables
         let hash_table_seed = crypto::hash("(hash table)", HashType::FileKey);
         let block_table_seed = crypto::hash("(block table)", HashType::FileKey);
         // Open the file from the path
-        let mut file = fs::File::open(path).context("Failed to open file")?;
+        let mut file = fs::File::open(path)?;
         // Read and validate the header
         // If the header is not present (or is invalid), there's no need to proceed
         let (header, offset) = Header::find_in_file(&mut file)?;
@@ -70,19 +68,19 @@ impl Archive {
         self.get_block_index(filename).is_some()
     }
 
-    pub fn get_file(&self, filename: &str) -> anyhow::Result<File> {
+    pub fn get_file(&self, filename: &str) -> Result<File> {
         // Get the block
         let block = self.get_block_index(filename)
             .and_then(|index| Some(&self.block_table[index as usize]))
-            .context("Failed to get block for file")?;
+            .ok_or(Error::new(ErrorKind::NotFound, "Failed to get block for file"))?;
         if !block.exists() {
-            bail!("File block is marked as non-existant")
+            return Err(Error::new(ErrorKind::NotFound, "File block marked as non-existant"))?;
         }
         // If the file is encrypted, get the encryption key
         let file_key = if block.is_encrypted() {
             let filename = filename.split(&['\\', '/'][..])
                 .last()
-                .context("Failed to extract filename from path")?;
+                .ok_or(Error::new(ErrorKind::InvalidData, "Failed to extract filename from path"))?;
             Some(crypto::hash(filename, HashType::FileKey))
         } else {
             None
@@ -123,7 +121,7 @@ impl Archive {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct File<'a> {
     key: Option<u32>,
     block: BlockEntry,
@@ -134,18 +132,14 @@ impl<'a> File<'a> {
     pub fn size(&self) -> usize {
         self.block.size_unpacked as usize
     }
-}
 
-impl Read for File<'_> {
-    fn read(&mut self, out: &mut [u8]) -> Result<usize> {
+    pub fn read(&self, out: &mut [u8]) -> Result<usize> {
         // Check that the file can be read into the supplied output buffer
         if out.len() < self.block.size_unpacked as usize {
             return Err(Error::new(ErrorKind::InvalidInput, "Output buffer not large enough for unpacked file"));
         }
         // Clone the file handle to keep the archive as immutable
-        let mut file = self.archive.file
-            .try_clone()?;
-
+        let mut file = self.archive.file.try_clone()?;
         // Get the block and file offset
         let block = &self.block;
         let offset = self.archive.offset + block.offset as usize;
@@ -190,5 +184,46 @@ impl Read for File<'_> {
             }
             Ok(bytes_written)
         }
+    }
+
+    // TODO: Move this somewhere else
+    pub fn read_as_pcx(&self) -> Result<(usize, usize, Vec<u8>)> {
+        let mut buffer = vec![0x0u8; self.size()];
+        self.read(&mut buffer)?;
+
+        let mut reader = pcx::Reader::new(Cursor::new(buffer))?;
+
+        let bpp = 3;
+        let (width, height) = reader.dimensions();
+        let size = width as usize * height as usize * bpp;
+        
+        let mut data = vec![0x0u8; size as usize];
+        if reader.is_paletted() {
+            let mut image: Vec<Vec<u8>> = Vec::with_capacity(height as usize);
+            for _y in 0..height {
+                let mut row = vec![0x0u8; width as usize];
+                reader.next_row_paletted(&mut row)?;
+                image.push(row);
+            }
+
+            let mut pallete = vec![0x0u8; 256*3];
+            if let Some(_len) = reader.palette_length() {
+                reader.read_palette(&mut pallete)?;
+            }
+
+            let mut offset = 0usize;
+            for y in 0..height {
+                for x in 0..width {
+                    let i = image[height as usize - y as usize - 1][x as usize] as usize;
+                    data[offset + 0] = pallete[i*3 + 0];
+                    data[offset + 1] = pallete[i*3 + 1];
+                    data[offset + 2] = pallete[i*3 + 2];
+                    offset += bpp as usize;
+                }
+            }
+        } else {
+            todo!()
+        }
+        Ok((width as usize, height as usize, data))
     }
 }

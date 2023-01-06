@@ -1,11 +1,10 @@
 use std::{fs, mem};
-use std::io::{SeekFrom, Seek, Read, Result};
+use std::io::{SeekFrom, Seek, Read};
+use std::io::{Error, ErrorKind, Result};
 
 use bitflags::bitflags;
 
 use byteorder::{ByteOrder, LittleEndian};
-
-use anyhow::{bail, Context};
 
 use super::crypto;
 
@@ -30,15 +29,13 @@ pub trait ByteReadable {
         offset: usize,
         count: usize,
         seed: u32,
-    ) -> anyhow::Result<Vec<T>> {
+    ) -> Result<Vec<T>> {
         // Allocate a buffer large enough to hold all entries
         let size = count * mem::size_of::<T>();
         let mut buffer = vec![0x0u8; size];
         // Seek and read from the file handle
-        file.seek(SeekFrom::Start(offset as u64))
-            .context("Failed to seek")?;
-        file.read_exact(&mut buffer)
-            .context("Failed to read from file")?;
+        file.seek(SeekFrom::Start(offset as u64))?;
+        file.read_exact(&mut buffer)?;
         // Decrypt the buffer contents
         crypto::decrypt(&mut buffer, seed);
         // Map the buffer contents into a vector
@@ -71,10 +68,9 @@ pub struct Header {
 
 impl Header {
     /// Try to find the MPQ header and it's offset in the file
-    pub fn find_in_file(file: &mut fs::File) -> anyhow::Result<(Self, usize)> {
+    pub fn find_in_file(file: &mut fs::File) -> Result<(Self, usize)> {
         // Get the size of the file
-        let archive_size = file.metadata()
-            .context("Failed to get file metadata")?
+        let archive_size = file.metadata()?
             .len() as usize;
         // Offset into the archive that the header was found at
         let mut archive_offset = 0usize;
@@ -82,10 +78,8 @@ impl Header {
         let mut buffer: [u8; HEADER_SIZE] = [0; HEADER_SIZE];
         loop {
             // Seek to the next archive offset and read
-            file.seek(SeekFrom::Start(archive_offset as u64))
-                .context("Failed to seek into file")?;
-            file.read_exact(&mut buffer)
-                .context("Failed to read from file")?;
+            file.seek(SeekFrom::Start(archive_offset as u64))?;
+            file.read_exact(&mut buffer)?;
             // Read and validate the header
             let header = Header::read(&buffer);
             if header.is_valid() {
@@ -95,7 +89,7 @@ impl Header {
             archive_offset += 512;
             // If the archive offset has exceeded the file size, bail
             if archive_offset > archive_size {
-                bail!("Failed to find valid header in file");
+                return Err(Error::new(ErrorKind::NotFound, "Failed to find valid header in file"));
             }
         }
     }

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 
+gl = "0.14"
 glfw = "0.49"
 
 pcx = "0.2"
