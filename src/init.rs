@@ -78,15 +78,19 @@ impl App {
         let pipeline = Pipeline::new(Topology::Triangles, &[ &vertex_shader, &fragment_shader ])?;
 
         let (_width, _height, texture) = {
-            let title_file = self.mpq.get_file("ui_art\\title.pcx")?;
-            let title_image = Image::read_pcx(&title_file, None)?;
+            let title_file = self.mpq.get_file("ui_art\\logo.pcx")?;
+            let title_image = ImageArray::read_pcx(&title_file, 15, Some(250))?;
+
+            let (width, height) = title_image.dimensions();
+            let pixels = title_image.get(15)
+                .context("Failed to get pixel data for image")?;
 
             let texture = Texture::new(
-                title_image.width, 
-                title_image.height, 
+                width, height, 
                 Format::R8g8b8a8_uint, 
                 Filtering::Nearest,
-                &title_image.pixels)?;
+                pixels
+            )?;
             (title_image.width, title_image.height, texture)
         };
 
