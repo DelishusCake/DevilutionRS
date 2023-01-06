@@ -99,6 +99,14 @@ pub struct VertexLayout {
 }
 
 impl VertexLayout {
+    pub const fn member(format: Format, stride: usize, offset: usize) -> Self {
+        Self {
+            format,
+            stride,
+            offset,
+        }
+    } 
+
     pub fn bind(layout: &[VertexLayout]) {
         unsafe {
             for (index, entry) in layout.iter().enumerate() {

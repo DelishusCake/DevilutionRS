@@ -1,56 +1,39 @@
+use std::mem::size_of;
+use memoffset::offset_of;
+
 use glfw::{WindowHint, OpenGlProfileHint};
 
+use cgmath::*;
 use anyhow::Context;
 
 use crate::mpq::Archive;
-
-use crate::gfx::Image;
-
-use crate::gfx::{Bindable, Topology, Format, Filtering};
-use crate::gfx::{Shader, Pipeline, VertexArray, Texture};
+use crate::gfx::*;
 
 pub const TITLE: &str = "Diablo";
 pub const SCREEN_WIDTH: u32 = 640;
 pub const SCREEN_HEIGHT: u32 = 480;
 
-pub const VERTEX_SHADER: &str = r#"
-#version 330 core
-#extension GL_ARB_separate_shader_objects : enable
-
-out VertexData 
-{
-    vec2 uv;
-} vs_out;
-
-void main() {
-    float x = -1.0 + float((gl_VertexID & 1) << 2);
-    float y = -1.0 + float((gl_VertexID & 2) << 1);
-
-    vs_out.uv.x = (x + 1.0) * 0.5;
-    vs_out.uv.y = (y + 1.0) * 0.5;
-
-    gl_Position = vec4(x, y, 0.0, 1.0);
+#[derive(Debug, Clone, Copy)]
+struct Vertex {
+    pos: Vector2<f32>,
+    uv: Vector2<f32>,
+    col: Vector4<f32>,
 }
-"#;
 
-pub const FRAGMENT_SHADER: &str = r#"
-#version 330 core
-#extension GL_ARB_separate_shader_objects : enable
+pub const LAYOUT: &'static [VertexLayout] = &[
+    VertexLayout::member(Format::R32g32_float, size_of::<Vertex>(), offset_of!(Vertex, pos)),
+    VertexLayout::member(Format::R32g32_float, size_of::<Vertex>(), offset_of!(Vertex, uv)),
+    VertexLayout::member(Format::R32g32b32a32_float, size_of::<Vertex>(), offset_of!(Vertex, col)),
+];
 
-in VertexData
-{
-    vec2 uv;
-} fs_in;
+pub const VERTEX_SHADER: &str = include_str!("gfx/shaders/basic.vert");
+pub const FRAGMENT_SHADER: &str = include_str!("gfx/shaders/basic.frag");
 
-layout(location=0) out vec4 o_frag;
-
-uniform sampler2D u_texture;
-
-void main()
-{
-    o_frag = texture(u_texture, fs_in.uv);
+#[derive(Debug, Clone)]
+#[repr(C)]
+struct Uniforms {
+    transform: Matrix4<f32>,
 }
-"#;
 
 #[derive(Debug)]
 pub struct App {
@@ -94,19 +77,42 @@ impl App {
 
         let pipeline = Pipeline::new(Topology::Triangles, &[ &vertex_shader, &fragment_shader ])?;
 
-        let vertex_array = VertexArray::new();
-
-        let texture = {
+        let (_width, _height, texture) = {
             let title_file = self.mpq.get_file("ui_art\\title.pcx")?;
             let title_image = Image::read_pcx(&title_file, None)?;
 
-            Texture::new(
+            let texture = Texture::new(
                 title_image.width, 
                 title_image.height, 
                 Format::R8g8b8a8_uint, 
                 Filtering::Nearest,
-                &title_image.pixels)?
+                &title_image.pixels)?;
+            (title_image.width, title_image.height, texture)
         };
+
+        let transform = Matrix4::from_scale(2.0);
+        
+        let uniforms = Uniforms {
+            transform
+        };
+
+        let indices = vec![0u16, 1u16, 2u16, 0u16, 3u16, 2u16];
+
+        let vertices = vec![
+            Vertex { pos: Vector2::new(-0.5, -0.5), uv: Vector2::new(0.0, 0.0), col: Vector4::new(1.0, 1.0, 1.0, 1.0) },
+            Vertex { pos: Vector2::new( 0.5, -0.5), uv: Vector2::new(1.0, 0.0), col: Vector4::new(1.0, 1.0, 1.0, 1.0) },
+            Vertex { pos: Vector2::new( 0.5,  0.5), uv: Vector2::new(1.0, 1.0), col: Vector4::new(1.0, 1.0, 1.0, 1.0) },
+            Vertex { pos: Vector2::new(-0.5,  0.5), uv: Vector2::new(0.0, 1.0), col: Vector4::new(1.0, 1.0, 1.0, 1.0) },
+        ];
+
+        let vertex_buffer = DynamicBuffer::new(gl::ARRAY_BUFFER, vertices.len(), Some(&vertices));
+        let index_buffer = DynamicBuffer::new(gl::ELEMENT_ARRAY_BUFFER, indices.len(), Some(&indices));
+        let uniform_buffer = DynamicBuffer::new(gl::UNIFORM_BUFFER, indices.len(), Some(&[ uniforms ]));
+
+        let vertex_array = VertexArray::new();
+        vertex_array.bind();
+        VertexLayout::bind(LAYOUT);
+        vertex_array.unbind();
 
         /*
         let tex_location = unsafe {
@@ -129,22 +135,30 @@ impl App {
                 gl::Viewport(0, 0, SCREEN_WIDTH as i32, SCREEN_HEIGHT as i32);
                 gl::Scissor(0, 0, SCREEN_WIDTH as i32, SCREEN_HEIGHT as i32);
 
-                gl::Clear(gl::COLOR_BUFFER_BIT);
-                
-                pipeline.bind();
-                {
-                    // gl::Uniform1i(tex_location, 0);
-                    
-                    texture.bind_at(0);
-                    {
-                        vertex_array.bind();
-                        gl::DrawArrays(gl::TRIANGLES, 0i32, 3i32);
-                        vertex_array.unbind();
-                    }
-                    texture.unbind();
-                }
-                pipeline.unbind();
+                gl::Clear(gl::COLOR_BUFFER_BIT);    
             }
+            
+            pipeline.bind();
+            texture.bind_at(0);
+            // gl::Uniform1i(tex_location, 0);
+            {    
+                vertex_array.bind();
+                index_buffer.bind();
+                vertex_buffer.bind();
+
+                let offset = 0;
+                let binding = 0;
+                uniform_buffer.bind_range(binding, offset);
+                unsafe {
+                    gl::DrawElements(gl::TRIANGLES, 6i32, gl::UNSIGNED_SHORT, std::ptr::null());
+                }
+                uniform_buffer.unbind();
+                index_buffer.unbind();
+                vertex_buffer.unbind();
+                vertex_array.unbind();
+            }
+            texture.unbind();
+            pipeline.unbind();
 
             window.swap_buffers();
             glfw.poll_events();
