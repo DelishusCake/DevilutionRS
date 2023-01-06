@@ -255,6 +255,8 @@ impl Texture {
             gl::BindTexture(gl::TEXTURE_2D, handle);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, filtering as i32);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, filtering as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
             gl::TexImage2D(gl::TEXTURE_2D, 
                 0, pixel_type as i32, width as i32, height as i32, 
                 0, pixel_type as u32, pixel_layout, pixels.as_ptr() as *const c_void);

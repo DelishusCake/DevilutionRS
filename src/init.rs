@@ -20,7 +20,7 @@ struct Vertex {
     col: Vector4<f32>,
 }
 
-pub const LAYOUT: &'static [VertexLayout] = &[
+pub const LAYOUT: [VertexLayout; 3] = [
     VertexLayout::member(Format::R32g32_float, size_of::<Vertex>(), offset_of!(Vertex, pos)),
     VertexLayout::member(Format::R32g32_float, size_of::<Vertex>(), offset_of!(Vertex, uv)),
     VertexLayout::member(Format::R32g32b32a32_float, size_of::<Vertex>(), offset_of!(Vertex, col)),
@@ -55,7 +55,7 @@ impl App {
         let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS)
             .context("Failed to initialize GLFW3")?;
 
-        glfw.window_hint(WindowHint::Resizable(false));
+        glfw.window_hint(WindowHint::Resizable(true));
         glfw.window_hint(WindowHint::SRgbCapable(true));
         glfw.window_hint(WindowHint::DoubleBuffer(true));
         glfw.window_hint(WindowHint::ContextVersion(3, 3));
@@ -78,12 +78,11 @@ impl App {
         let pipeline = Pipeline::new(Topology::Triangles, &[ &vertex_shader, &fragment_shader ])?;
 
         let (_width, _height, texture) = {
-            let title_file = self.mpq.get_file("ui_art\\logo.pcx")?;
-            let title_image = ImageArray::read_pcx(&title_file, 15, Some(250))?;
+            let title_file = self.mpq.get_file("ui_art\\title.pcx")?;
+            let title_image = Image::read_pcx(&title_file, Some(250))?;
 
             let (width, height) = title_image.dimensions();
-            let pixels = title_image.get(15)
-                .context("Failed to get pixel data for image")?;
+            let pixels = &title_image.pixels;
 
             let texture = Texture::new(
                 width, height, 
@@ -115,7 +114,16 @@ impl App {
 
         let vertex_array = VertexArray::new();
         vertex_array.bind();
-        VertexLayout::bind(LAYOUT);
+        {
+            index_buffer.bind();
+            vertex_buffer.bind();
+            
+            VertexLayout::bind(&LAYOUT);
+
+            let offset = 0;
+            let binding = 0;
+            uniform_buffer.bind_range(binding, offset);
+        }
         vertex_array.unbind();
 
         /*
@@ -126,6 +134,10 @@ impl App {
         */
 
         while !window.should_close() {
+            let aspect_ratio = SCREEN_WIDTH as f32 / SCREEN_HEIGHT as f32;
+            let window_size = window.get_framebuffer_size();
+            let viewport = Viewport::from_window(aspect_ratio, window_size);
+
             unsafe {
                 gl::Enable(gl::SCISSOR_TEST);
                 gl::Disable(gl::CULL_FACE);
@@ -136,8 +148,8 @@ impl App {
                 gl::BlendEquation(gl::FUNC_ADD);
                 gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
 
-                gl::Viewport(0, 0, SCREEN_WIDTH as i32, SCREEN_HEIGHT as i32);
-                gl::Scissor(0, 0, SCREEN_WIDTH as i32, SCREEN_HEIGHT as i32);
+                gl::Viewport(viewport.x, viewport.y, viewport.w, viewport.h);
+                gl::Scissor(viewport.x, viewport.y, viewport.w, viewport.h);
 
                 gl::Clear(gl::COLOR_BUFFER_BIT);    
             }
@@ -147,18 +159,9 @@ impl App {
             // gl::Uniform1i(tex_location, 0);
             {    
                 vertex_array.bind();
-                index_buffer.bind();
-                vertex_buffer.bind();
-
-                let offset = 0;
-                let binding = 0;
-                uniform_buffer.bind_range(binding, offset);
                 unsafe {
                     gl::DrawElements(gl::TRIANGLES, 6i32, gl::UNSIGNED_SHORT, std::ptr::null());
                 }
-                uniform_buffer.unbind();
-                index_buffer.unbind();
-                vertex_buffer.unbind();
                 vertex_array.unbind();
             }
             texture.unbind();
@@ -174,5 +177,28 @@ impl App {
             */
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Viewport {
+    x: i32,
+    y: i32,
+    w: i32, 
+    h: i32, 
+}
+
+impl Viewport {
+    pub fn from_window(aspect_ratio: f32, window_size: (i32, i32)) -> Self {
+        let (width, height) = window_size;
+        let mut w = width;
+        let mut h = (w as f32 / aspect_ratio + 0.5f32) as i32;
+        if h > height {
+            h = height;
+            w = (height as f32 * aspect_ratio + 0.5f32) as i32;
+        }
+        let x = (width - w) / 2;
+        let y = (height - h) / 2;
+        Self { x, y, w, h }
     }
 }
