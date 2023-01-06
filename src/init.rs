@@ -77,12 +77,12 @@ impl App {
 
         let pipeline = Pipeline::new(Topology::Triangles, &[ &vertex_shader, &fragment_shader ])?;
 
-        let (_width, _height, texture) = {
-            let title_file = self.mpq.get_file("ui_art\\title.pcx")?;
-            let title_image = Image::read_pcx(&title_file, Some(250))?;
+        let title = {
+            let file = self.mpq.get_file("ui_art\\title.pcx")?;
+            let image = Image::read_pcx(&file, None)?;
 
-            let (width, height) = title_image.dimensions();
-            let pixels = &title_image.pixels;
+            let (width, height) = image.dimensions();
+            let pixels = &image.pixels;
 
             let texture = Texture::new(
                 width, height, 
@@ -90,53 +90,72 @@ impl App {
                 Filtering::Nearest,
                 pixels
             )?;
-            (title_image.width, title_image.height, texture)
+            texture
         };
 
-        let transform = Matrix4::from_scale(2.0);
-        
-        let uniforms = Uniforms {
-            transform
+        let logo_frames = {
+            let file = self.mpq.get_file("ui_art\\logo.pcx")?;
+            let image = ImageArray::read_pcx(&file, 15, Some(250))?;
+
+            let (width, height) = image.dimensions();
+
+            let mut frames: Vec<Texture> = Vec::with_capacity(15);
+            for i in 1..=15 {
+                let pixels = image.get(15 - i)?;
+                let texture = Texture::new(
+                    width, height, 
+                    Format::R8g8b8a8_uint, 
+                    Filtering::Nearest,
+                    pixels
+                )?;
+                frames.push(texture)
+            }
+            frames
         };
 
-        let indices = vec![0u16, 1u16, 2u16, 0u16, 3u16, 2u16];
+        let mut batch = Batch::new(1024, 1024); 
 
-        let vertices = vec![
-            Vertex { pos: Vector2::new(-0.5, -0.5), uv: Vector2::new(0.0, 0.0), col: Vector4::new(1.0, 1.0, 1.0, 1.0) },
-            Vertex { pos: Vector2::new( 0.5, -0.5), uv: Vector2::new(1.0, 0.0), col: Vector4::new(1.0, 1.0, 1.0, 1.0) },
-            Vertex { pos: Vector2::new( 0.5,  0.5), uv: Vector2::new(1.0, 1.0), col: Vector4::new(1.0, 1.0, 1.0, 1.0) },
-            Vertex { pos: Vector2::new(-0.5,  0.5), uv: Vector2::new(0.0, 1.0), col: Vector4::new(1.0, 1.0, 1.0, 1.0) },
-        ];
+        let logo_frame_time = 1.0 / 15.0;
 
-        let vertex_buffer = DynamicBuffer::new(gl::ARRAY_BUFFER, vertices.len(), Some(&vertices));
-        let index_buffer = DynamicBuffer::new(gl::ELEMENT_ARRAY_BUFFER, indices.len(), Some(&indices));
-        let uniform_buffer = DynamicBuffer::new(gl::UNIFORM_BUFFER, indices.len(), Some(&[ uniforms ]));
+        let mut logo_timer = 0f64;
+        let mut logo_frame_index = 0usize; 
 
-        let vertex_array = VertexArray::new();
-        vertex_array.bind();
-        {
-            index_buffer.bind();
-            vertex_buffer.bind();
-            
-            VertexLayout::bind(&LAYOUT);
-
-            let offset = 0;
-            let binding = 0;
-            uniform_buffer.bind_range(binding, offset);
-        }
-        vertex_array.unbind();
-
-        /*
-        let tex_location = unsafe {
-            let location = CString::new("u_texture".as_bytes())?;
-            gl::GetUniformLocation(program, location.as_ptr())
-        };
-        */
-
+        let mut last_time = glfw.get_time();
         while !window.should_close() {
-            let aspect_ratio = SCREEN_WIDTH as f32 / SCREEN_HEIGHT as f32;
+            let now_time = glfw.get_time();
+            let delta = now_time - last_time;
+            last_time = now_time;
+
+            logo_timer += delta;
+            if logo_timer >= logo_frame_time {
+                logo_frame_index = (logo_frame_index + 1) % logo_frames.len();
+                logo_timer -= logo_frame_time;
+            }
+
+
             let window_size = window.get_framebuffer_size();
+            let aspect_ratio = SCREEN_WIDTH as f32 / SCREEN_HEIGHT as f32;
+            
             let viewport = Viewport::from_window(aspect_ratio, window_size);
+            let projection = {
+                let scale_x = window_size.0 as f32 / SCREEN_WIDTH as f32;
+                let scale_y = window_size.1 as f32 / SCREEN_HEIGHT as f32;
+                let scale = Matrix4::from_nonuniform_scale(scale_x, scale_y, 1.0);
+                let ortho = ortho(0.0, window_size.0 as f32, window_size.1 as f32, 0.0, -1.0, 1.0);
+                ortho*scale
+            };
+
+            batch.clear();
+            {
+                let screen_center = Vector2::new(SCREEN_WIDTH as f32 * 0.5, SCREEN_HEIGHT as f32 * 0.5);
+                
+                batch.sprite(&title, Xform2D::position(screen_center), Vector4::new(1.0, 1.0, 1.0, 1.0));
+
+                let logo = &logo_frames[logo_frame_index];
+                let pos = Vector2::new(SCREEN_WIDTH as f32 * 0.5, SCREEN_HEIGHT as f32 - 182.0);
+                batch.sprite(logo, Xform2D::position(pos), Vector4::new(1.0, 1.0, 1.0, 1.0));
+            }
+            batch.flush(projection);
 
             unsafe {
                 gl::Enable(gl::SCISSOR_TEST);
@@ -153,19 +172,8 @@ impl App {
 
                 gl::Clear(gl::COLOR_BUFFER_BIT);    
             }
-            
-            pipeline.bind();
-            texture.bind_at(0);
-            // gl::Uniform1i(tex_location, 0);
-            {    
-                vertex_array.bind();
-                unsafe {
-                    gl::DrawElements(gl::TRIANGLES, 6i32, gl::UNSIGNED_SHORT, std::ptr::null());
-                }
-                vertex_array.unbind();
-            }
-            texture.unbind();
-            pipeline.unbind();
+
+            batch.render(&pipeline);
 
             window.swap_buffers();
             glfw.poll_events();

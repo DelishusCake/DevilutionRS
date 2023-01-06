@@ -237,8 +237,13 @@ impl<T> Drop for DynamicBuffer<T> {
     }
 }
 
-#[derive(Debug)]
-pub struct Texture(u32);
+#[derive(Debug, Clone, PartialEq)]
+pub struct Texture
+{
+    pub width: usize,
+    pub height: usize,
+    pub handle: u32,
+}
 
 impl Texture {
     pub fn new(
@@ -264,13 +269,17 @@ impl Texture {
 
             handle
         };
-        Ok(Self(handle))
+        Ok(Self {
+            width,
+            height,
+            handle
+        })
     }
 
     pub fn bind_at(&self, index: u32) {
         unsafe {
             gl::ActiveTexture(gl::TEXTURE0 + index);
-            gl::BindTexture(gl::TEXTURE_2D, self.0);
+            gl::BindTexture(gl::TEXTURE_2D, self.handle);
         }
     }
 }
@@ -278,7 +287,7 @@ impl Texture {
 impl Bindable for Texture {
     fn bind(&self) {
         unsafe {
-            gl::BindTexture(gl::TEXTURE_2D, self.0)
+            gl::BindTexture(gl::TEXTURE_2D, self.handle)
         }
     }
     fn unbind(&self) { 
@@ -291,7 +300,7 @@ impl Bindable for Texture {
 impl Drop for Texture {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteTextures(1, &self.0)
+            gl::DeleteTextures(1, &self.handle)
         }
     }
 }
