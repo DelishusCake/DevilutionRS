@@ -8,7 +8,9 @@ use gl::types::*;
 use cgmath::*;
 
 use super::Xform2D;
+
 use super::gpu::*;
+use super::material::{MaterialMap, Material};
 
 #[derive(Debug, Copy, Clone)]
 struct Vertex {
@@ -27,24 +29,32 @@ const VERTEX_LAYOUT: [VertexLayout; 3] =
 #[derive(Debug)]
 struct Range {
     texture: u32,
+    topology: Topology,
+    material: Material,
+
     offset: usize,
     count: usize,
 }
 
 impl Range {
-    fn should_change(&self, texture: &Texture) -> bool {
-        self.texture != texture.handle
+    fn should_change(&self, texture: u32, topology: Topology, material: Material) -> bool {
+        self.texture != texture || self.topology != topology || self.material != material
     }
-    fn render(&self, format: GLenum, pipeline: &Pipeline) {
-        let topology: GLenum = pipeline.topology.into();
+    fn render(&self, format: GLenum, materials: &MaterialMap) {
+        let pipeline = materials.get(self.topology, self.material).unwrap();
+        pipeline.bind();
         unsafe {
+            // Get the OpenGL pipeline topology
+            let topology: GLenum = self.topology.into();
             // Bind (or unbind) the current texture handle
             gl::ActiveTexture(gl::TEXTURE0 + 0);
             gl::BindTexture(gl::TEXTURE_2D, self.texture);
             // Calculate byte offset to indices and convert to void pointer
             let offset = offset_ptr::<i16>(self.offset);
             gl::DrawElements(topology, self.count as i32, format, offset);
+            gl::BindTexture(gl::TEXTURE_2D, 0);
         }
+        pipeline.unbind();
     }
 }
 
@@ -117,6 +127,35 @@ impl Batch {
         self.indices.flush();
     }
 
+    pub fn aabb(&mut self, pos: Vector2<f32>, size: Vector2<f32>, color: Vector4<f32>) {
+        const INDEX_PATTERN: [usize;6] = [0, 1, 2, 0, 3, 2];
+
+        let hw = size.x*0.5;
+        let hh = size.y*0.5;
+
+        let positions = [
+            Vector2::new(pos.x - hw, pos.y - hh),
+            Vector2::new(pos.x + hw, pos.y - hh),
+            Vector2::new(pos.x + hw, pos.y + hh),
+            Vector2::new(pos.x - hw, pos.y + hh),
+        ];
+
+        self.push_range(Topology::Triangles, Material::Color, 0, |vertices, indices| {
+            let mut quad_indices = [0u16; 6];
+            for (i, pos) in positions.iter().enumerate() {
+                let vertex = Vertex {
+                    pos: *pos,
+                    uv: Vector2::zero(),
+                    col: color,
+                };
+                quad_indices[i] = vertices.push(vertex) as u16; 
+            }
+            for offset in INDEX_PATTERN {
+                indices.push(quad_indices[offset]);
+            }
+        });
+    }
+
     pub fn sprite(&mut self, texture: &Texture, xform: Xform2D, color: Vector4<f32>) {
         const INDEX_PATTERN: [usize;6] = [0, 1, 2, 0, 3, 2];
         
@@ -136,19 +175,18 @@ impl Batch {
             Vertex{ pos: xform.apply(vec2(-hw,  hh)), uv: vec2(s0, t0), col: color },
         ];
 
-        self.push_range(texture, |vertices, indices| {
+        self.push_range(Topology::Triangles, Material::Textured, texture.handle, |vertices, indices| {
             let mut sprite_indices = [0u16; 6];
             for (i, v) in verts.iter().enumerate() {
                 sprite_indices[i] = vertices.push(*v) as u16; 
             }
             for offset in INDEX_PATTERN {
-                let idx:u16 = sprite_indices[offset];
-                indices.push(idx);
+                indices.push(sprite_indices[offset]);
             }
         });
     }
 
-    pub fn render(&mut self, pipeline: &Pipeline) {
+    pub fn render(&mut self, materials: &MaterialMap) {
         // GL format for the index buffer
         let index_format = gl::UNSIGNED_SHORT;
 
@@ -163,17 +201,15 @@ impl Batch {
         self.uniforms.bind_range(binding, offset);
 
         // For each range, bind the pipeline and issue the draw call
-        pipeline.bind();
         for range in &self.ranges {
-            range.render(index_format, pipeline);
+            range.render(index_format, materials);
         }
-        pipeline.unbind();
         self.uniforms.unbind();
         self.vertex_array.unbind();
     }
 
     #[inline]
-    fn push_range<F>(&mut self, texture: &Texture, mut draw_fn: F)
+    fn push_range<F>(&mut self, topology: Topology, material: Material, texture: u32, mut draw_fn: F)
     where 
         F: FnMut(&mut DynamicBuffer<Vertex>, &mut DynamicBuffer<u16>) 
     {
@@ -182,9 +218,9 @@ impl Batch {
         // Get the range to draw to
         let mut range = {
             // If the range list is empty, or the current range doesn't match draw parameters
-            if self.ranges.is_empty() || self.ranges.last().unwrap().should_change(texture) {
+            if self.ranges.is_empty() || self.ranges.last().unwrap().should_change(texture, topology, material) {
                 // Push a new range
-                let range = Range { texture: texture.handle, offset, count: 0 };
+                let range = Range { texture, topology, material, offset, count: 0 };
                 self.ranges.push(range);
             }
             // Return the last range in the list

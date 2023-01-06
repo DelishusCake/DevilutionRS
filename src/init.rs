@@ -1,6 +1,3 @@
-use std::mem::size_of;
-use memoffset::offset_of;
-
 use glfw::{WindowHint, OpenGlProfileHint};
 
 use cgmath::*;
@@ -10,30 +7,11 @@ use crate::mpq::Archive;
 use crate::gfx::*;
 
 pub const TITLE: &str = "Diablo";
-pub const SCREEN_WIDTH: u32 = 640;
-pub const SCREEN_HEIGHT: u32 = 480;
+pub const SCREEN_WIDTH: u32 = 1920 >> 1;
+pub const SCREEN_HEIGHT: u32 = 1080 >> 1;
 
-#[derive(Debug, Clone, Copy)]
-struct Vertex {
-    pos: Vector2<f32>,
-    uv: Vector2<f32>,
-    col: Vector4<f32>,
-}
-
-pub const LAYOUT: [VertexLayout; 3] = [
-    VertexLayout::member(Format::R32g32_float, size_of::<Vertex>(), offset_of!(Vertex, pos)),
-    VertexLayout::member(Format::R32g32_float, size_of::<Vertex>(), offset_of!(Vertex, uv)),
-    VertexLayout::member(Format::R32g32b32a32_float, size_of::<Vertex>(), offset_of!(Vertex, col)),
-];
-
-pub const VERTEX_SHADER: &str = include_str!("gfx/shaders/basic.vert");
-pub const FRAGMENT_SHADER: &str = include_str!("gfx/shaders/basic.frag");
-
-#[derive(Debug, Clone)]
-#[repr(C)]
-struct Uniforms {
-    transform: Matrix4<f32>,
-}
+pub const RENDER_WIDTH: u32 = 640;
+pub const RENDER_HEIGHT: u32 = 480;
 
 #[derive(Debug)]
 pub struct App {
@@ -72,11 +50,6 @@ impl App {
 
         gl::load_with(|s| glfw.get_proc_address_raw(s));
 
-        let vertex_shader = Shader::vertex(VERTEX_SHADER, None)?;
-        let fragment_shader = Shader::fragment(FRAGMENT_SHADER, None)?;
-
-        let pipeline = Pipeline::new(Topology::Triangles, &[ &vertex_shader, &fragment_shader ])?;
-
         let title = {
             let file = self.mpq.get_file("ui_art\\title.pcx")?;
             let image = Image::read_pcx(&file, None)?;
@@ -113,12 +86,12 @@ impl App {
             frames
         };
 
+        let mut fade_animation = Animation::new(24, 48, AnimationType::OneShot);
+        let mut logo_animation = Animation::new(24, 15, AnimationType::Looping);
+
         let mut batch = Batch::new(1024, 1024); 
 
-        let logo_frame_time = 1.0 / 15.0;
-
-        let mut logo_timer = 0f64;
-        let mut logo_frame_index = 0usize; 
+        let materials = MaterialMap::new()?;
 
         let mut last_time = glfw.get_time();
         while !window.should_close() {
@@ -126,20 +99,16 @@ impl App {
             let delta = now_time - last_time;
             last_time = now_time;
 
-            logo_timer += delta;
-            if logo_timer >= logo_frame_time {
-                logo_frame_index = (logo_frame_index + 1) % logo_frames.len();
-                logo_timer -= logo_frame_time;
-            }
-
+            logo_animation.update(delta);
+            fade_animation.update(delta);
 
             let window_size = window.get_framebuffer_size();
-            let aspect_ratio = SCREEN_WIDTH as f32 / SCREEN_HEIGHT as f32;
+            let aspect_ratio = RENDER_WIDTH as f32 / RENDER_HEIGHT as f32;
             
             let viewport = Viewport::from_window(aspect_ratio, window_size);
             let projection = {
-                let scale_x = window_size.0 as f32 / SCREEN_WIDTH as f32;
-                let scale_y = window_size.1 as f32 / SCREEN_HEIGHT as f32;
+                let scale_x = window_size.0 as f32 / RENDER_WIDTH as f32;
+                let scale_y = window_size.1 as f32 / RENDER_HEIGHT as f32;
                 let scale = Matrix4::from_nonuniform_scale(scale_x, scale_y, 1.0);
                 let ortho = ortho(0.0, window_size.0 as f32, window_size.1 as f32, 0.0, -1.0, 1.0);
                 ortho*scale
@@ -147,13 +116,19 @@ impl App {
 
             batch.clear();
             {
-                let screen_center = Vector2::new(SCREEN_WIDTH as f32 * 0.5, SCREEN_HEIGHT as f32 * 0.5);
+                let screen_size = Vector2::new(RENDER_WIDTH as f32, RENDER_HEIGHT as f32);
+                let screen_center = screen_size * 0.5;
                 
                 batch.sprite(&title, Xform2D::position(screen_center), Vector4::new(1.0, 1.0, 1.0, 1.0));
 
-                let logo = &logo_frames[logo_frame_index];
-                let pos = Vector2::new(SCREEN_WIDTH as f32 * 0.5, SCREEN_HEIGHT as f32 - 182.0);
+                let logo = &logo_frames[logo_animation.index()];
+                let pos = Vector2::new(screen_center.x, RENDER_HEIGHT as f32 - 182.0);
                 batch.sprite(logo, Xform2D::position(pos), Vector4::new(1.0, 1.0, 1.0, 1.0));
+
+                if !fade_animation.is_done() {
+                    let fade_color = Vector4::new(0.0, 0.0, 0.0, 1.0 - fade_animation.percentage());
+                    batch.aabb(screen_center, screen_size, fade_color);
+                }
             }
             batch.flush(projection);
 
@@ -173,7 +148,7 @@ impl App {
                 gl::Clear(gl::COLOR_BUFFER_BIT);    
             }
 
-            batch.render(&pipeline);
+            batch.render(&materials);
 
             window.swap_buffers();
             glfw.poll_events();
@@ -208,5 +183,58 @@ impl Viewport {
         let x = (width - w) / 2;
         let y = (height - h) / 2;
         Self { x, y, w, h }
+    }
+}
+
+#[derive(Debug)]
+enum AnimationType {
+    OneShot,
+    Looping,
+}
+
+#[derive(Debug)]
+struct Animation {
+    time: f64,
+    frame_time: f64,
+    max_frames: usize,
+    current_frame: usize,
+    anim_type: AnimationType,
+}
+
+impl Animation {
+    pub fn new(frame_rate: u32, max_frames: usize, anim_type: AnimationType) -> Self {
+        Self {
+            time: 0.0,
+            anim_type,
+            max_frames,
+            frame_time: (1.0 / frame_rate as f64),
+            current_frame: 0,
+        }
+    }
+
+    pub fn update(&mut self, dt: f64) {
+        self.time += dt;
+        if self.time >= self.frame_time {
+            self.current_frame = match self.anim_type {
+                AnimationType::OneShot => usize::min(self.current_frame + 1, self.max_frames),
+                AnimationType::Looping => (self.current_frame + 1) % self.max_frames,
+            };
+            self.time -= self.frame_time;
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        self.current_frame
+    }
+
+    pub fn percentage(&self) -> f32 {
+        self.current_frame as f32 / self.max_frames as f32
+    }
+
+    pub fn is_done(&self) -> bool {
+        match self.anim_type {
+            AnimationType::OneShot => self.current_frame == self.max_frames,
+            AnimationType::Looping => false,
+        }
     }
 }

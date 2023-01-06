@@ -15,7 +15,7 @@ pub trait Bindable {
 }
 
 /// Geometric topology
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Topology {
     Lines,
     Triangles,
@@ -49,7 +49,7 @@ impl Into<GLenum> for Filtering {
 /// GPU format used for both vertex and texture types
 /// Non-camel case types are used to make reading easier
 /// Format: <channel><size in bits>..._type
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[allow(non_camel_case_types)]
 pub enum Format {
     R8_uint,

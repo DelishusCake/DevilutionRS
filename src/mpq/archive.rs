@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use std::io::{Read, Seek, SeekFrom, Cursor};
+use std::io::{Read, Seek, SeekFrom};
 use std::io::{Error, ErrorKind, Result};
 
 use super::header::*;
