@@ -21,7 +21,7 @@ impl TitleScreen {
             title_image: None,
             logo_frames: None,
             fade_animation: Animation::new(24, 48, AnimationType::OneShot),
-            logo_animation: Animation::new(24, 15, AnimationType::Looping),
+            logo_animation: Animation::new(15, 15, AnimationType::Looping),
         }
     }
 }
@@ -38,7 +38,7 @@ impl GameScreen for TitleScreen {
             let texture = Texture::new(
                 width, height, 
                 Format::R8g8b8a8_uint, 
-                Filtering::Nearest,
+                Filtering::Linear,
                 pixels
             )?;
             Some(texture)
@@ -56,7 +56,7 @@ impl GameScreen for TitleScreen {
                 let texture = Texture::new(
                     width, height, 
                     Format::R8g8b8a8_uint, 
-                    Filtering::Nearest,
+                    Filtering::Linear,
                     pixels
                 )?;
                 frames.push(texture)

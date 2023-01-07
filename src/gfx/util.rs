@@ -1,5 +1,8 @@
+/// NOTE: These two functions use old-school pointer arithmetic and unchecked de-referencing
+/// to achieve the best blit performance possible.
+
 /// Blit a RGB paletted image into an RGBA output buffer
-pub fn blit_with_palette(
+pub unsafe fn blit_with_palette(
     width: usize, height: usize,
     pallete: &[u8; 256*3],
     src: &[u8], dst: &mut [u8])
@@ -14,29 +17,29 @@ pub fn blit_with_palette(
     let min_x = 0usize;
     let max_x = width;
 
-    let mut dst_row = min_x*bpp + min_y*dst_pitch;
-    let mut src_row = (height-1)*src_pitch;
+    let mut dst_row = dst[(min_x*bpp + min_y*dst_pitch)..].as_mut_ptr();
+    let mut src_row = src[(height-1)*src_pitch..].as_ptr();
     for _y in min_y..max_y {
         let mut dst_pixel = dst_row;
         let mut src_pixel = src_row;
         for _x in min_x..max_x {
-            let value = src[src_pixel] as usize;
+            let value = *src_pixel as usize;
 
-            dst[dst_pixel + 0] = pallete[value*3 + 0];
-            dst[dst_pixel + 1] = pallete[value*3 + 1];
-            dst[dst_pixel + 2] = pallete[value*3 + 2];
-            dst[dst_pixel + 3] = 0xFF;
+            *dst_pixel.add(0) = *pallete.get_unchecked(value*3 + 0);
+            *dst_pixel.add(1) = *pallete.get_unchecked(value*3 + 1);
+            *dst_pixel.add(2) = *pallete.get_unchecked(value*3 + 2);
+            *dst_pixel.add(3) = 0xFF;
             
-            dst_pixel += bpp;
-            src_pixel += 1;
+            dst_pixel = dst_pixel.add(bpp);
+            src_pixel = src_pixel.add(1);
         }
-        dst_row += dst_pitch;
-        src_row = usize::max(src_row.wrapping_sub(src_pitch), 0);
+        dst_row = dst_row.add(dst_pitch);
+        src_row = src_row.sub(src_pitch);
     }
 }
 
 /// Blit a RGB paletted image into an RGBA output buffer, with a transparency index
-pub fn blit_with_palette_and_transparency(
+pub unsafe fn blit_with_palette_and_transparency(
     width: usize, height: usize,
     palette: &[u8; 256*3], transparency: u8,
     src: &[u8], dst: &mut [u8])
@@ -51,28 +54,28 @@ pub fn blit_with_palette_and_transparency(
     let min_x = 0usize;
     let max_x = width;
 
-    let mut dst_row = min_x*bpp + min_y*dst_pitch;
-    let mut src_row = (height-1)*src_pitch;
+    let mut dst_row = dst[(min_x*bpp + min_y*dst_pitch)..].as_mut_ptr();
+    let mut src_row = src[(height-1)*src_pitch..].as_ptr();
     for _y in min_y..max_y {
         let mut dst_pixel = dst_row;
         let mut src_pixel = src_row;
         for _x in min_x..max_x {
-            let value = src[src_pixel] as usize;
-            let alpha = if value == transparency as usize {
+            let value = *src_pixel as usize;
+            let mask = if value == transparency as usize {
                 0x00
             } else {
                 0xFF
             };
 
-            dst[dst_pixel + 0] = palette[value*3 + 0];
-            dst[dst_pixel + 1] = palette[value*3 + 1];
-            dst[dst_pixel + 2] = palette[value*3 + 2];
-            dst[dst_pixel + 3] = alpha;
+            *dst_pixel.add(0) = mask & palette.get_unchecked(value*3 + 0);
+            *dst_pixel.add(1) = mask & palette.get_unchecked(value*3 + 1);
+            *dst_pixel.add(2) = mask & palette.get_unchecked(value*3 + 2);
+            *dst_pixel.add(3) = mask & 0xFF;
             
-            dst_pixel += bpp;
-            src_pixel += 1;
+            dst_pixel = dst_pixel.add(bpp);
+            src_pixel = src_pixel.add(1);
         }
-        dst_row += dst_pitch;
-        src_row = usize::max(src_row.wrapping_sub(src_pitch), 0);
+        dst_row = dst_row.add(dst_pitch);
+        src_row = src_row.sub(src_pitch);
     }
 }

@@ -47,13 +47,15 @@ impl Image {
             reader.read_palette(&mut palette)?;
         }
         // Blit to the image pixels based on the palette and transparency
-        if let Some(transparency) = transparency {
-            blit_with_palette_and_transparency(
-                width, height, 
-                &palette, transparency,
-                &src_image, &mut pixels);
-        } else {
-            blit_with_palette(width, height, &palette, &src_image, &mut pixels);
+        unsafe {
+            if let Some(transparency) = transparency {
+                blit_with_palette_and_transparency(
+                    width, height, 
+                    &palette, transparency,
+                    &src_image, &mut pixels);
+            } else {
+                blit_with_palette(width, height, &palette, &src_image, &mut pixels);
+            }
         }
 
         Ok(Self {
