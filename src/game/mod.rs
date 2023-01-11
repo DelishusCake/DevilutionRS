@@ -1,5 +1,7 @@
+mod anim;
 mod title_screen;
 
+pub use anim::*;
 pub use title_screen::*;
 
 use glfw::{Window, WindowEvent};

@@ -176,11 +176,13 @@ impl<'a> File<'a> {
                     crypto::decrypt(&mut input, key + index as u32);
                 }
                 // Apply decompression 
-                if block.is_imploded() {
-                    bytes_written += compression::explode_into(input, output)?;
+                bytes_written += if block.is_imploded() {
+                    compression::explode_into(input, output)?
                 } else if block.has_muli_compression() {
-                    bytes_written += compression::decompress_into(input, output)?;
-                }
+                    compression::decompress_into(input, output)?
+                } else {
+                    todo!()
+                };
             }
             Ok(bytes_written)
         }
