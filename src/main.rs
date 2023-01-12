@@ -2,10 +2,13 @@ use glfw::{WindowHint, OpenGlProfileHint};
 
 use cgmath::*;
 use anyhow::Context;
+use crate::screen::GameScreen;
 
 use diablo::mpq::Archive;
 use diablo::gfx::*;
 use diablo::game::*;
+
+use diablo::game::screens::TitleScreen;
 
 pub const TITLE: &str = "Diablo";
 pub const SCREEN_WIDTH: u32 = RENDER_WIDTH;
@@ -51,8 +54,7 @@ fn main() -> anyhow::Result<()> {
 
     // Initialize at the title screen
     // TODO: Intro video
-    let mut screen: Box<dyn GameScreen> = Box::new(TitleScreen::new());
-    screen.on_enter(&diablo_mpq)?;
+    let mut screen: Box<dyn GameScreen> = Box::new(TitleScreen::new(&diablo_mpq)?);
 
     let mut last_time = glfw.get_time();
     while !window.should_close() {

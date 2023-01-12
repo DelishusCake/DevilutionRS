@@ -4,49 +4,40 @@ use cgmath::*;
 
 use crate::mpq::*;
 use crate::gfx::*;
+
 use crate::game::*;
+use crate::game::screen::GameScreen;
+use crate::game::anim::{Tween, Frame, Looping};
 
 #[derive(Debug)]
 pub struct TitleScreen {
-    title: Option<Texture>,
-    logo_frames: Option<Vec<Texture>>,
+    title: Texture,
+    logo_frames: Vec<Texture>,
 
     logo_animation: Tween<Frame>,
     fade_animation: Tween<Frame>,
 }
 
-impl TitleScreen {
-    pub fn new() -> Self {
-        Self {
-            title: None,
-            logo_frames: None,
-            fade_animation: Tween::new(Frame(0), Frame(48), 2.0, Looping::OneShot),
-            logo_animation: Tween::new(Frame(0), Frame(15), 1.0, Looping::Loop),
-        }
-    }
-}
-
 impl GameScreen for TitleScreen {
-    fn on_enter(&mut self, archive: &Archive) -> anyhow::Result<()> { 
+    fn new(archive: &Archive) -> anyhow::Result<Self> { 
         let format = Format::R8g8b8a8_uint;
         let filtering = Filtering::Nearest;
 
-        self.title = {
+        let title = {
             let file = archive.get_file("ui_art\\title.pcx")?;
             let image = Image::read_pcx(&file, None)?;
 
             let (width, height) = image.dimensions();
             let pixels = &image.pixels;
 
-            let texture = Texture::new(
+            Texture::new(
                 width, height, 
                 format, filtering,
                 pixels
-            )?;
-            Some(texture)
+            )?
         };
 
-        self.logo_frames = {
+        let logo_frames = {
             let file = archive.get_file("ui_art\\logo.pcx")?;
             let image = ImageArray::read_pcx(&file, 15, Some(250))?;
 
@@ -62,10 +53,15 @@ impl GameScreen for TitleScreen {
                 )?;
                 frames.push(texture)
             }
-            Some(frames)
+            frames
         };
 
-        Ok(())
+        Ok(Self {
+            title,
+            logo_frames,
+            fade_animation: Tween::new(Frame(0), Frame(48), 2.0, Looping::OneShot),
+            logo_animation: Tween::new(Frame(0), Frame(15), 1.0, Looping::Loop),
+        })
     }
     fn handle_event(&mut self, window: &mut Window, event: &WindowEvent) { 
         use glfw::{Key, Action};
@@ -85,10 +81,10 @@ impl GameScreen for TitleScreen {
         let screen_center = screen_size * 0.5;
         let color_white = Vector4::new(1.0, 1.0, 1.0, 1.0);
         
-        batch.sprite(self.title.as_ref().unwrap(), Xform2D::position(screen_center), color_white);
+        batch.sprite(&self.title, Xform2D::position(screen_center), color_white);
 
         let frame: usize = self.logo_animation.value().into();
-        let logo = &self.logo_frames.as_ref().unwrap()[frame];
+        let logo = &self.logo_frames[frame];
         let pos = Vector2::new(screen_center.x, RENDER_HEIGHT as f32 - 182.0);
         batch.sprite(logo, Xform2D::position(pos), color_white);
 
