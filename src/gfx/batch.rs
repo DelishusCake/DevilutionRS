@@ -186,7 +186,7 @@ impl Batch {
         });
     }
 
-    pub fn render(&mut self, materials: &MaterialMap) {
+    pub fn render(&self, materials: &MaterialMap) {
         // GL format for the index buffer
         let index_format = gl::UNSIGNED_SHORT;
 
