@@ -6,8 +6,8 @@ use crate::mpq::*;
 use crate::gfx::*;
 
 use crate::game::*;
+use crate::game::anim::*;
 use crate::game::screen::GameScreen;
-use crate::game::anim::{Tween, Frame, Looping};
 
 /*
 const FONT_FILENAMES: [&'static str; 5] = [
@@ -32,8 +32,8 @@ pub struct TitleScreen {
     title: Texture,
     logo_frames: Vec<Texture>,
 
-    logo_animation: Tween<Frame>,
-    fade_animation: Tween<Frame>,
+    logo_animation: LoopingTween<Frame>,
+    fade_animation: OneShotTween<Frame>,
 }
 
 impl GameScreen for TitleScreen {
@@ -84,8 +84,8 @@ impl GameScreen for TitleScreen {
         Ok(Self {
             title,
             logo_frames,
-            fade_animation: Tween::new(Frame(0), Frame(48), 2.0, Looping::OneShot),
-            logo_animation: Tween::new(Frame(0), Frame(15), 1.0, Looping::Loop),
+            fade_animation: OneShotTween::new(Frame(0), Frame(48), 2.0),
+            logo_animation: LoopingTween::new(Frame(0), Frame(15), 1.0),
         })
     }
 
