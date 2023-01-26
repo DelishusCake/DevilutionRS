@@ -12,70 +12,15 @@ use super::Xform2D;
 use super::gpu::*;
 use super::material::{MaterialMap, Material};
 
-#[derive(Debug, Copy, Clone)]
-struct Vertex {
-    pos: Vector2<f32>,
-    uv:  Vector2<f32>,
-    col: Vector4<f32>,
-}
-
-const VERTEX_LAYOUT: [VertexLayout; 3] = 
-[
-    VertexLayout { format: Format::R32g32_float, stride: size_of::<Vertex>(), offset: offset_of!(Vertex, pos) as usize },
-    VertexLayout { format: Format::R32g32_float, stride: size_of::<Vertex>(), offset: offset_of!(Vertex, uv) as usize },
-    VertexLayout { format: Format::R32g32b32a32_float, stride: size_of::<Vertex>(), offset: offset_of!(Vertex, col) as usize },
-];
-
-#[derive(Debug)]
-struct Range {
-    texture: u32,
-    topology: Topology,
-    material: Material,
-
-    offset: usize,
-    count: usize,
-}
-
-impl Range {
-    fn should_change(&self, texture: u32, topology: Topology, material: Material) -> bool {
-        self.texture != texture || self.topology != topology || self.material != material
-    }
-    fn render(&self, format: GLenum, materials: &MaterialMap) {
-        let pipeline = materials.get(self.topology, self.material).unwrap();
-        pipeline.bind();
-        unsafe {
-            // Get the OpenGL pipeline topology
-            let topology: GLenum = self.topology.into();
-            // Bind (or unbind) the current texture handle
-            gl::ActiveTexture(gl::TEXTURE0 + 0);
-            gl::BindTexture(gl::TEXTURE_2D, self.texture);
-            // Calculate byte offset to indices and convert to void pointer
-            let offset = offset_ptr::<i16>(self.offset);
-            gl::DrawElements(topology, self.count as i32, format, offset);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-        }
-        pipeline.unbind();
-    }
-}
-
-/// Get the pointer-equivalent of an offset into an array of T
-/// NOTE: OpenGL likes to use void pointers for offsets for some reason
-/// This is fine in C, where pointers are integers, but really annoying in Rust
-fn offset_ptr<T>(value: usize) -> *const c_void {
-    let byte_offset = value * size_of::<T>();
-    byte_offset as *const c_void
-}
-
-#[derive(Clone, Debug)]
-#[repr(C)]
-struct Uniforms {
-    projection: Matrix4<f32>,
-}
-
+/// Geometry batching renderer
+/// Records draw requests and transforms them into GPU-usable data
 #[derive(Debug)]
 pub struct Batch {
+    // The current ranges to draw
     ranges: Vec<Range>,
 
+    // VBO/VAO objects
+    // TODO: Utilize ring buffers to enqueue frames for rendering
     uniforms: DynamicBuffer<Uniforms>,
     indices: DynamicBuffer<u16>,
     vertices: DynamicBuffer<Vertex>,
@@ -83,18 +28,20 @@ pub struct Batch {
 }
 
 impl Batch {
+    /// Create a new batch with a specified maximum number of vertices and indices
     pub fn new(max_vertices: usize, max_indices: usize) -> Self {
+        // Allocate buffers
         let uniforms: DynamicBuffer<Uniforms> = DynamicBuffer::new(gl::UNIFORM_BUFFER, 1, None);
         let indices: DynamicBuffer<u16> =  DynamicBuffer::new(gl::ELEMENT_ARRAY_BUFFER, max_indices, None);
         let vertices: DynamicBuffer<Vertex> = DynamicBuffer::new(gl::ARRAY_BUFFER, max_vertices, None);
 
+        // Create the vao and bind the vertex layout
         let vertex_array = {
             let vao = VertexArray::new();
             vao.bind();
             {
                 vertices.bind();
                 VertexLayout::bind(&VERTEX_LAYOUT);
-                
                 indices.bind();
             }
             vao.unbind();
@@ -110,12 +57,13 @@ impl Batch {
         }
     }
 
+    // Clear the batch for the next frame of rendering
     pub fn clear(&mut self) {
         self.vertices.clear();
         self.indices.clear();
         self.ranges.clear();
     }
-
+    // Flush any recorded draw data (including the projection matrix)
     pub fn flush(&mut self, projection: Matrix4<f32>) {
         self.uniforms.clear();
         self.uniforms.push(Uniforms {
@@ -127,6 +75,8 @@ impl Batch {
         self.indices.flush();
     }
 
+    /// Draw an Axis Aligned Bounding Box (i.e. a non-rotatable, unfilled rectangle)
+    /// NOTE: Mostly used for debugging
     pub fn aabb(&mut self, pos: Vector2<f32>, size: Vector2<f32>, color: Vector4<f32>) {
         const INDEX_PATTERN: [usize;6] = [0, 1, 2, 0, 3, 2];
 
@@ -154,8 +104,10 @@ impl Batch {
                 indices.push(quad_indices[offset]);
             }
         });
-    }
+    }  
 
+    /// Draw a textured, colored quad using the specified transform
+    /// TODO: Support specifying the portion of the texture to draw
     pub fn sprite(&mut self, texture: &Texture, xform: Xform2D, color: Vector4<f32>) {
         const INDEX_PATTERN: [usize;6] = [0, 1, 2, 0, 3, 2];
         
@@ -169,10 +121,10 @@ impl Batch {
         let hh = h*0.5;
         
         let verts = [
-            Vertex{ pos: xform.apply(vec2(-hw, -hh)), uv: vec2(s0, t1), col: color },
-            Vertex{ pos: xform.apply(vec2( hw, -hh)), uv: vec2(s1, t1), col: color },
-            Vertex{ pos: xform.apply(vec2( hw,  hh)), uv: vec2(s1, t0), col: color },
-            Vertex{ pos: xform.apply(vec2(-hw,  hh)), uv: vec2(s0, t0), col: color },
+            Vertex{ pos: xform * vec2(-hw, -hh), uv: vec2(s0, t1), col: color },
+            Vertex{ pos: xform * vec2( hw, -hh), uv: vec2(s1, t1), col: color },
+            Vertex{ pos: xform * vec2( hw,  hh), uv: vec2(s1, t0), col: color },
+            Vertex{ pos: xform * vec2(-hw,  hh), uv: vec2(s0, t0), col: color },
         ];
 
         self.push_range(Topology::Triangles, Material::Textured, texture.handle, |vertices, indices| {
@@ -186,6 +138,8 @@ impl Batch {
         });
     }
 
+    /// Render the batched geometry to the screen
+    /// NOTE: `flush` must be called before rendering
     pub fn render(&self, materials: &MaterialMap) {
         // GL format for the index buffer
         let index_format = gl::UNSIGNED_SHORT;
@@ -231,4 +185,77 @@ impl Batch {
         // Add the new indices to the range count
         range.count += self.indices.len() - offset;
     }
+}
+
+/// Vertex structure for the Batch object
+#[derive(Debug, Copy, Clone)]
+struct Vertex {
+    pos: Vector2<f32>,
+    uv:  Vector2<f32>,
+    col: Vector4<f32>,
+}
+
+/// Layout descriptor for the vertex structure
+const VERTEX_LAYOUT: [VertexLayout; 3] = 
+[
+    VertexLayout { format: Format::R32g32_float, stride: size_of::<Vertex>(), offset: offset_of!(Vertex, pos) as usize },
+    VertexLayout { format: Format::R32g32_float, stride: size_of::<Vertex>(), offset: offset_of!(Vertex, uv) as usize },
+    VertexLayout { format: Format::R32g32b32a32_float, stride: size_of::<Vertex>(), offset: offset_of!(Vertex, col) as usize },
+];
+
+/// Range object
+/// The Batch compresses rendering into as few draw calls as possible.
+/// Each draw call is represented by a Range object, describing the material/topolgy/and offset into the index buffer
+#[derive(Debug)]
+struct Range {
+    texture: u32,
+    topology: Topology,
+    material: Material,
+
+    offset: usize,
+    count: usize,
+}
+
+impl Range {
+    /// Does this range match a pending draw call?
+    fn should_change(&self, texture: u32, topology: Topology, material: Material) -> bool {
+        self.texture != texture || self.topology != topology || self.material != material
+    }
+
+    /// Render the range
+    /// NOTE: Should only be called within the render method of the batch
+    fn render(&self, format: GLenum, materials: &MaterialMap) {
+        // Get the pipeline to use
+        // NOTE: Unwrap here is okay, it's better to just crash if the draw call is invalid
+        let pipeline = materials.get(self.topology, self.material).unwrap();
+        pipeline.bind();
+        unsafe {
+            // Get the OpenGL pipeline topology
+            let topology: GLenum = self.topology.into();
+            // Bind (or unbind) the current texture handle
+            gl::ActiveTexture(gl::TEXTURE0 + 0);
+            gl::BindTexture(gl::TEXTURE_2D, self.texture);
+            // Calculate byte offset to indices and convert to void pointer
+            let offset = offset_ptr::<i16>(self.offset);
+            gl::DrawElements(topology, self.count as i32, format, offset);
+            gl::BindTexture(gl::TEXTURE_2D, 0);
+        }
+        pipeline.unbind();
+    }
+}
+
+/// Uniform structure for batch rendering
+/// NOTE: Only one uniform buffer per batch
+#[derive(Clone, Debug)]
+#[repr(C)]
+struct Uniforms {
+    projection: Matrix4<f32>,
+}
+
+/// Get the pointer-equivalent of an offset into an array of T
+/// NOTE: OpenGL likes to use void pointers for offsets for some reason
+/// This is fine in C, where pointers are integers, but really annoying in Rust
+fn offset_ptr<T>(value: usize) -> *const c_void {
+    let byte_offset = value * size_of::<T>();
+    byte_offset as *const c_void
 }

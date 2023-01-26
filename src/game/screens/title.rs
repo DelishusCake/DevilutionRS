@@ -25,6 +25,8 @@ const FONT_FILENAMES: [&'static str; 5] = [
 ];
 */
 
+/// Game title screen
+/// First screen after the intro video and before the main menu
 #[derive(Debug)]
 pub struct TitleScreen {
     title: Texture,

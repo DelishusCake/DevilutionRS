@@ -7,8 +7,10 @@ use anyhow::{bail, Context};
 
 use gl::types::*;
 
+/// Length, in characters, of the info log for shader and pipeline objects
 const INFO_LOG_LEN: usize = 1024;
 
+/// Trait for GPU resources that must be bound/unbound to be used
 pub trait Bindable {
     fn bind(&self);
     fn unbind(&self);
@@ -237,6 +239,8 @@ impl<T> Drop for DynamicBuffer<T> {
     }
 }
 
+/// Texture object
+/// TODO: Utilize a texture queue/manager to allow for async texture creation
 #[derive(Debug, Clone, PartialEq)]
 pub struct Texture
 {
@@ -246,6 +250,7 @@ pub struct Texture
 }
 
 impl Texture {
+    /// Create a new texture
     pub fn new(
         width: usize, height: usize, 
         format: Format, filtering: Filtering,
@@ -276,6 +281,8 @@ impl Texture {
         })
     }
 
+    /// Bind the texture to a texture slot
+    /// NOTE: Shader bindings must be set to the texture slot index!
     pub fn bind_at(&self, index: u32) {
         unsafe {
             gl::ActiveTexture(gl::TEXTURE0 + index);
@@ -305,6 +312,7 @@ impl Drop for Texture {
     }
 }
 
+/// Wrapper for a Vertex Array Object (VAO)
 #[derive(Debug)]
 pub struct VertexArray(u32);
 
@@ -344,6 +352,7 @@ impl Drop for VertexArray {
 /// (name, bind point)
 pub type ShaderBinding = (&'static str, u32);
 
+/// Wrapper for a shader object
 #[derive(Debug)]
 pub enum Shader {
     Vertex(GLuint),
@@ -383,6 +392,8 @@ impl Drop for Shader {
     }
 }
 
+/// Wrapper for a graphics/compute pipeline object
+/// NOTE: OpenGL terminology is "program"
 #[derive(Debug)]
 pub struct Pipeline {
     program: u32,

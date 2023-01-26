@@ -10,10 +10,11 @@ use diablo::game::*;
 
 use diablo::game::screens::TitleScreen;
 
+// Window constants
 pub const TITLE: &str = "Diablo";
 pub const SCREEN_WIDTH: u32 = RENDER_WIDTH;
 pub const SCREEN_HEIGHT: u32 = RENDER_HEIGHT;
-
+// Rendering constants
 pub const MAX_INDICES: usize = 1024;
 pub const MAX_VERTICES: usize = 1024;
 
@@ -113,6 +114,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Viewport structure for aspect-ratio correct rendering
 #[derive(Debug, Copy, Clone)]
 struct Viewport {
     x: i32,
@@ -122,6 +124,7 @@ struct Viewport {
 }
 
 impl Viewport {
+    /// Calculate the viewport from a given window dimension and a desired aspec ratio
     pub fn from_window(aspect_ratio: f32, window_size: (i32, i32)) -> Self {
         let (width, height) = window_size;
         let mut w = width;

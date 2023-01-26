@@ -1,5 +1,7 @@
 use byteorder::{ByteOrder, LittleEndian};
 
+/// MPQ encryption magic constant table
+/// TODO: Maybe generate this at run time/move to a separate file
 const CRYPT_BUF: [u32; 0x500] = [
     0x55c636e2, 0x02be0170, 0x584b71d4, 0x2984f00e, 0xb682c809, 0x91cf876b, 0x775a9c24, 0x597d5ca5,
     0x5a1afeb2, 0xd3e9ce0d, 0x32cdcdf8, 0xb18201cd, 0x3cce05ce, 0xa55d13be, 0xbb0afe71, 0x9376ab33,
@@ -163,6 +165,7 @@ const CRYPT_BUF: [u32; 0x500] = [
     0x1c9fa44a, 0xc406b6d7, 0xeedca152, 0x6149809c, 0xb0099ef4, 0xc5f653a5, 0x4c10790d, 0x7303286c,
 ];
 
+/// Enumeration for the type of hashing being done
 #[derive(Debug)]
 pub enum HashType {
     TableOffset,
@@ -171,6 +174,7 @@ pub enum HashType {
     FileKey,
 }
 
+/// Hash a string into a unsigned 32-bit integer
 pub fn hash(string: &str, hash_type: HashType) -> u32 {
     // Map the hash type into its offset in the crypt table
     let offset = match hash_type {
@@ -198,6 +202,8 @@ pub fn hash(string: &str, hash_type: HashType) -> u32 {
     seed_1
 }
 
+/// Decrypt a byte-buffer of memory using a seed value
+/// NOTE: Decrypts in place
 pub fn decrypt(block: &mut [u8], seed: u32) {
     // Initialize the seeds
     let mut seed_1 = seed;

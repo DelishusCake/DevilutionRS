@@ -8,7 +8,7 @@ use super::{crypto, compression};
 use super::crypto::HashType;
 
 /// MPQ data archive
-/// This is *not* intended as a complete implementation of the MPQ file format, just usable enough for this project
+/// This is *not* intended as a complete implementation of the MPQ file format, just one usable enough for this project
 /// NOTE: Big thanks to the libmpq library by ge0rg
 /// https://github.com/ge0rg/libmpq/blob/master/libmpq/mpq-internal.h
 #[derive(Debug)]
@@ -28,6 +28,7 @@ pub struct Archive {
 }
 
 impl Archive {
+    /// Open an existing archive from the file system
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         // Hash the seeds for the archive tables
         let hash_table_seed = crypto::hash("(hash table)", HashType::FileKey);
@@ -64,10 +65,12 @@ impl Archive {
         })
     }
 
+    /// Check if a file exists in the archive
     pub fn has_file(&self, filename: &str) -> bool {
         self.get_block_index(filename).is_some()
     }
 
+    /// Get the handle for a file in the archive
     pub fn get_file(&self, filename: &str) -> Result<File> {
         // Get the block
         let block = self.get_block_index(filename)
@@ -78,9 +81,11 @@ impl Archive {
         }
         // If the file is encrypted, get the encryption key
         let file_key = if block.is_encrypted() {
+            // Get the last portion of the filename, without the path info
             let filename = filename.split(&['\\', '/'][..])
                 .last()
                 .ok_or(Error::new(ErrorKind::InvalidData, "Failed to extract filename from path"))?;
+            // Hash the filename as the encryption key
             Some(crypto::hash(filename, HashType::FileKey))
         } else {
             None
@@ -121,6 +126,7 @@ impl Archive {
     }
 }
 
+/// A handle pointing to a file stored in a MPQ Archive
 #[derive(Debug, Clone, Copy)]
 pub struct File<'a> {
     key: Option<u32>,
@@ -129,10 +135,14 @@ pub struct File<'a> {
 }
 
 impl<'a> File<'a> {
+    /// Get the decompressed file size
     pub fn size(&self) -> usize {
         self.block.size_unpacked as usize
     }
 
+    /// Read the file into the out buffer. The out buffer must be large enough to hold the complete file.
+    /// NOTE: This matches the std::io::Read, but cannot be implemented directly.
+    /// This is because the whole file must be read at once, due to the way compression and encryption work.
     pub fn read(&self, out: &mut [u8]) -> Result<usize> {
         // Check that the file can be read into the supplied output buffer
         if out.len() < self.block.size_unpacked as usize {

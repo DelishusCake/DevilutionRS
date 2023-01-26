@@ -1,3 +1,45 @@
+use std::ops::Mul;
+use cgmath::*;
+
+/// 2D transformation structure
+/// TODO: Move this somewhere else
+#[derive(Copy, Clone, Debug)]
+pub struct Xform2D {
+    rot: Basis2<f32>,
+    pos: Vector2<f32>,
+}
+
+impl Xform2D {
+    /// Create a new transform with a position and rotation
+    pub fn new(pos: Vector2<f32>, rot: Basis2<f32>) -> Self {
+        Self { rot, pos }
+    }
+
+    /// Create a new transform with a position and no rotation
+    pub fn position(pos: Vector2<f32>) -> Self {
+        Self {
+            rot: Rotation2::from_angle(Rad(0.0)),
+            pos,
+        }
+    }
+
+    /// Create a new identity transform
+    pub fn identity() -> Self {
+        Self {
+            rot: Rotation2::from_angle(Rad(0.0f32)),
+            pos: vec2(0.0f32, 0.0f32),
+        }
+    }
+}
+
+/// Implement the mul trait to support transforming 2D vectors
+impl Mul<Vector2<f32>> for Xform2D {
+    type Output = Vector2<f32>;
+    fn mul(self, v: Vector2<f32>) -> Vector2<f32> {
+        self.rot.rotate_vector(v) + self.pos
+    }
+}
+
 /// NOTE: These two functions use old-school pointer arithmetic and unchecked de-referencing
 /// to achieve the best blit performance possible.
 
