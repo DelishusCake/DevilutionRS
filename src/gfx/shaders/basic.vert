@@ -2,12 +2,12 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(location=0) in vec2 i_pos;
-layout(location=1) in vec2 i_uv;
+layout(location=1) in vec3 i_uv;
 layout(location=2) in vec4 i_col;
 
 out VertexData 
 {
-    vec2 uv;
+    vec3 uv;
     vec4 col;
 } vs_out;
 

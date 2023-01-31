@@ -14,7 +14,7 @@ use crate::game::screen::GameScreen;
 #[derive(Debug)]
 pub struct TitleScreen {
     title: Texture,
-    logo_frames: Vec<Texture>,
+    logo_frames: TextureArray,
 
     logo_animation: LoopingTween<Frame>,
     fade_animation: OneShotTween<Frame>,
@@ -41,23 +41,14 @@ impl GameScreen for TitleScreen {
 
         let logo_frames = {
             let file = archive.get_file("ui_art\\logo.pcx")?;
-            let image = ImageArray::read_pcx(&file, 15, Some(250))?;
+            let image = Image::read_pcx(&file, Some(250))?;
 
+            let layers = 15;
             let (width, height) = image.dimensions();
+            let height = height / layers;
 
-            let mut frames: Vec<Texture> = Vec::with_capacity(15);
-            for i in 1..=15 {
-                let pixels = image.get(15 - i)?;
-                let texture = Texture::new(
-                    width, height, 
-                    format, filtering,
-                    pixels
-                )?;
-                frames.push(texture)
-            }
-            frames
+            TextureArray::new(width, height, layers, format, filtering, &image.pixels)?
         };
-
 
         // let _font = Font::load(archive, FontSize::Size16, FontColor::Grey)?;
 
@@ -91,9 +82,9 @@ impl GameScreen for TitleScreen {
         batch.sprite(&self.title, Xform2D::position(screen_center), color_white);
 
         let frame: usize = self.logo_animation.value().into();
-        let logo = &self.logo_frames[frame];
+        let frame = 15 - frame;
         let pos = Vector2::new(screen_center.x, RENDER_HEIGHT as f32 - 182.0);
-        batch.sprite(logo, Xform2D::position(pos), color_white);
+        batch.sprite_layer(&self.logo_frames, frame as u32, Xform2D::position(pos), color_white);
 
         if !self.fade_animation.is_done() {
             let fade_alpha = 1.0 - self.fade_animation.percentage();

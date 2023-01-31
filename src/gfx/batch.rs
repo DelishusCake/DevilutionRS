@@ -95,7 +95,7 @@ impl Batch {
             for (i, pos) in positions.iter().enumerate() {
                 let vertex = Vertex {
                     pos: *pos,
-                    uv: Vector2::zero(),
+                    uv: Vector3::zero(),
                     col: color,
                 };
                 quad_indices[i] = vertices.push(vertex) as u16; 
@@ -121,13 +121,46 @@ impl Batch {
         let hh = h*0.5;
         
         let verts = [
-            Vertex{ pos: xform * vec2(-hw, -hh), uv: vec2(s0, t1), col: color },
-            Vertex{ pos: xform * vec2( hw, -hh), uv: vec2(s1, t1), col: color },
-            Vertex{ pos: xform * vec2( hw,  hh), uv: vec2(s1, t0), col: color },
-            Vertex{ pos: xform * vec2(-hw,  hh), uv: vec2(s0, t0), col: color },
+            Vertex{ pos: xform * vec2(-hw, -hh), uv: vec3(s0, t1, 0.0), col: color },
+            Vertex{ pos: xform * vec2( hw, -hh), uv: vec3(s1, t1, 0.0), col: color },
+            Vertex{ pos: xform * vec2( hw,  hh), uv: vec3(s1, t0, 0.0), col: color },
+            Vertex{ pos: xform * vec2(-hw,  hh), uv: vec3(s0, t0, 0.0), col: color },
         ];
 
         self.push_range(Topology::Triangles, Material::Textured, texture.handle, |vertices, indices| {
+            let mut sprite_indices = [0u16; 6];
+            for (i, v) in verts.iter().enumerate() {
+                sprite_indices[i] = vertices.push(*v) as u16; 
+            }
+            for offset in INDEX_PATTERN {
+                indices.push(sprite_indices[offset]);
+            }
+        });
+    }
+
+    /// Draw a textured, colored quad using the specified transform
+    /// TODO: Support specifying the portion of the texture to draw
+    pub fn sprite_layer(&mut self, texture: &TextureArray, layer: u32, xform: Xform2D, color: Vector4<f32>) {
+        const INDEX_PATTERN: [usize;6] = [0, 1, 2, 0, 3, 2];
+        
+        let size = (texture.width as f32, texture.height as f32);
+        let _i_size = vec2(1.0 / size.0, 1.0 / size.1);
+
+        let l = layer as f32;
+        let (s0,t0,s1,t1) = (0.0,0.0,1.0,1.0);
+        let (_x,_y,w,h) = (0.0,0.0,size.0,size.1);
+
+        let hw = w*0.5;
+        let hh = h*0.5;
+        
+        let verts = [
+            Vertex{ pos: xform * vec2(-hw, -hh), uv: vec3(s0, t1, l), col: color },
+            Vertex{ pos: xform * vec2( hw, -hh), uv: vec3(s1, t1, l), col: color },
+            Vertex{ pos: xform * vec2( hw,  hh), uv: vec3(s1, t0, l), col: color },
+            Vertex{ pos: xform * vec2(-hw,  hh), uv: vec3(s0, t0, l), col: color },
+        ];
+
+        self.push_range(Topology::Triangles, Material::LayeredTexture, texture.handle, |vertices, indices| {
             let mut sprite_indices = [0u16; 6];
             for (i, v) in verts.iter().enumerate() {
                 sprite_indices[i] = vertices.push(*v) as u16; 
@@ -191,7 +224,7 @@ impl Batch {
 #[derive(Debug, Copy, Clone)]
 struct Vertex {
     pos: Vector2<f32>,
-    uv:  Vector2<f32>,
+    uv:  Vector3<f32>,
     col: Vector4<f32>,
 }
 
@@ -199,7 +232,7 @@ struct Vertex {
 const VERTEX_LAYOUT: [VertexLayout; 3] = 
 [
     VertexLayout { format: Format::R32g32_float, stride: size_of::<Vertex>(), offset: offset_of!(Vertex, pos) as usize },
-    VertexLayout { format: Format::R32g32_float, stride: size_of::<Vertex>(), offset: offset_of!(Vertex, uv) as usize },
+    VertexLayout { format: Format::R32g32b32_float, stride: size_of::<Vertex>(), offset: offset_of!(Vertex, uv) as usize },
     VertexLayout { format: Format::R32g32b32a32_float, stride: size_of::<Vertex>(), offset: offset_of!(Vertex, col) as usize },
 ];
 
@@ -234,11 +267,27 @@ impl Range {
             let topology: GLenum = self.topology.into();
             // Bind (or unbind) the current texture handle
             gl::ActiveTexture(gl::TEXTURE0 + 0);
-            gl::BindTexture(gl::TEXTURE_2D, self.texture);
+            match self.material {
+                Material::Textured => {
+                    gl::BindTexture(gl::TEXTURE_2D, self.texture);
+                },
+                Material::LayeredTexture => {
+                    gl::BindTexture(gl::TEXTURE_2D_ARRAY, self.texture);
+                }
+                _ => {},
+            }
             // Calculate byte offset to indices and convert to void pointer
             let offset = offset_ptr::<i16>(self.offset);
             gl::DrawElements(topology, self.count as i32, format, offset);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
+            match self.material {
+                Material::Textured => {
+                    gl::BindTexture(gl::TEXTURE_2D, 0);
+                },
+                Material::LayeredTexture => {
+                    gl::BindTexture(gl::TEXTURE_2D_ARRAY, 0);
+                },
+                _ => {},
+            }
         }
         pipeline.unbind();
     }

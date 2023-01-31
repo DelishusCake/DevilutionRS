@@ -5,6 +5,7 @@ use crate::gfx::{Shader, Pipeline, Topology};
 const VERTEX_SHADER_BASIC: &str = include_str!("shaders/basic.vert");
 const FRAGMENT_SHADER_COLOR: &str = include_str!("shaders/color.frag");
 const FRAGMENT_SHADER_TEXTURED: &str = include_str!("shaders/textured.frag");
+const FRAGMENT_SHADER_TEXTURED_ARRAY: &str = include_str!("shaders/textured_array.frag");
 
 /// Material type enums
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -13,6 +14,8 @@ pub enum Material {
 	Color,
 	/// Textured geometry
 	Textured,
+	/// Textured geometry using a texture array
+	LayeredTexture,
 }
 
 /// Material map
@@ -20,6 +23,7 @@ pub enum Material {
 #[derive(Debug)]
 pub struct MaterialMap {
 	textured: Pipeline,
+	textured_array: Pipeline,
 	color_lines: Pipeline,
 	color_triangles: Pipeline,
 }
@@ -39,15 +43,18 @@ impl MaterialMap {
         let fs_color = Shader::fragment(FRAGMENT_SHADER_COLOR, None)?;
         // Fragment shader for textured geometry
         let fs_textured = Shader::fragment(FRAGMENT_SHADER_TEXTURED, None)?;
+        let fs_textured_array = Shader::fragment(FRAGMENT_SHADER_TEXTURED_ARRAY, None)?;
 
         // Shader list describing the colored geometry pipeline
         let shaders_color = [ &vs_basic, &fs_color ];
         // Shader list describing the textured geometry pipeline
         let shaders_textured = [ &vs_basic, &fs_textured ];
+        let shaders_textured_array = [ &vs_basic, &fs_textured_array ];
 
         // Textured triangles pipeline
         // NOTE: It doesn't make much sense to have a line topoly version of this
         let textured = Pipeline::new(Topology::Triangles, &shaders_textured)?;
+        let textured_array = Pipeline::new(Topology::Triangles, &shaders_textured_array)?;
         // Colored lines pipeline
         let color_lines = Pipeline::new(Topology::Lines, &shaders_color)?;
         // Colored triangles pipeline
@@ -55,6 +62,7 @@ impl MaterialMap {
 
         Ok(Self {
         	textured,
+        	textured_array,
         	color_lines,
         	color_triangles
         })
@@ -66,6 +74,7 @@ impl MaterialMap {
 			(Topology::Lines,     Material::Color) => Some(&self.color_lines),
 			(Topology::Triangles, Material::Color) => Some(&self.color_triangles),
 			(Topology::Triangles, Material::Textured) => Some(&self.textured),
+			(Topology::Triangles, Material::LayeredTexture) => Some(&self.textured_array),
 			_ => None,
 		}
 	}

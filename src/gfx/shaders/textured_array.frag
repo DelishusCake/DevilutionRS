@@ -9,7 +9,9 @@ in VertexData
 
 layout(location=0) out vec4 o_frag;
 
+uniform sampler2DArray u_texture;
+
 void main()
 {
-    o_frag = fs_in.col;
+    o_frag = fs_in.col * texture(u_texture, fs_in.uv);
 }

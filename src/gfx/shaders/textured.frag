@@ -3,7 +3,7 @@
 
 in VertexData
 {
-    vec2 uv;
+    vec3 uv;
     vec4 col;
 } fs_in;
 
@@ -13,5 +13,5 @@ uniform sampler2D u_texture;
 
 void main()
 {
-    o_frag = fs_in.col * texture(u_texture, fs_in.uv);
+    o_frag = fs_in.col * texture(u_texture, fs_in.uv.xy);
 }
