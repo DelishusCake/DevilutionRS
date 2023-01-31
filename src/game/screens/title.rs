@@ -56,7 +56,7 @@ impl GameScreen for TitleScreen {
             title,
             logo_frames,
             fade_animation: OneShotTween::new(Frame(0), Frame(48), 2.0),
-            logo_animation: LoopingTween::new(Frame(0), Frame(15), 1.0),
+            logo_animation: LoopingTween::new(Frame(0), Frame(14), 1.0),
         })
     }
 
@@ -82,8 +82,9 @@ impl GameScreen for TitleScreen {
         batch.sprite(&self.title, Xform2D::position(screen_center), color_white);
 
         let frame: usize = self.logo_animation.value().into();
-        let frame = 15 - frame;
+        let frame = (self.logo_frames.layers - frame) - 1;
         let pos = Vector2::new(screen_center.x, RENDER_HEIGHT as f32 - 182.0);
+        
         batch.sprite_layer(&self.logo_frames, frame as u32, Xform2D::position(pos), color_white);
 
         if !self.fade_animation.is_done() {
