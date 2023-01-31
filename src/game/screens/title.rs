@@ -9,22 +9,6 @@ use crate::game::*;
 use crate::game::anim::*;
 use crate::game::screen::GameScreen;
 
-/*
-const FONT_FILENAMES: [&'static str; 5] = [
-    // Bad dictionary
-    // "ui_art\\font16g.pcx",
-    // Bad literal flag
-    // "ui_art\\font16s.pcx",
-    "ui_art\\font24g.pcx",
-    "ui_art\\font24s.pcx",
-    "ui_art\\font30g.pcx",
-    // Bad literal flag
-    // "ui_art\\font30s.pcx",
-    "ui_art\\font42g.pcx",
-    "ui_art\\font42y.pcx",
-];
-*/
-
 /// Game title screen
 /// First screen after the intro video and before the main menu
 #[derive(Debug)]
@@ -74,12 +58,8 @@ impl GameScreen for TitleScreen {
             frames
         };
 
-        let font = {
-            let file = archive.get_file("ui_art\\font24g.pcx")?;
-            let image = Image::read_pcx(&file, None)?;
 
-            println!("{:?}", image.dimensions());
-        };
+        // let _font = Font::load(archive, FontSize::Size16, FontColor::Grey)?;
 
         Ok(Self {
             title,

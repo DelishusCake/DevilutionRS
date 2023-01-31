@@ -22,7 +22,7 @@ pub fn explode_into(data: &[u8], out: &mut [u8]) -> Result<usize> {
 	// A new allocation on every sector is probably pretty slow
 	// it might be more performant with a custom implementation
 	let buffer = explode::explode(&data)
-		.map_err(|_| Error::new(ErrorKind::InvalidData, "Failed to explode block"))?;
+		.map_err(|e| Error::new(ErrorKind::InvalidData, format!("Failed to explode block: {}", e)))?;
 	// Copy into the output buffer
 	for (dst, src) in out.into_iter().zip(buffer.iter()) {
 		*dst = *src;

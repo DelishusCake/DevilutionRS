@@ -1,6 +1,5 @@
 DevilutionRS
 ---
-
 An attempt to re-create the 1996 Blizzard classic *Diablo®* to rust, taking heavy inspiration from the [DevilutionX](https://github.com/diasurgical/devilutionX) project.
 
 ## Progress
