@@ -56,7 +56,7 @@ impl GameScreen for TitleScreen {
                 &image.pixels)?
         };
 
-        let font = Font::load(archive, FontSize::Size24, FontColor::Grey)?;
+        let font = Font::load(archive, FontSize::Size42, FontColor::Grey)?;
 
         Ok(Self {
             title,
@@ -94,14 +94,7 @@ impl GameScreen for TitleScreen {
 
         batch.sprite_layer(&self.logo_frames, frame as u32, Xform2D::position(pos), color_white);
 
-        let mut x = 0.0;
-        for c in "Test String".chars() {
-            let (idx, advance) = self.font.get_char_info(c);
-
-            x = x + advance;
-            let y = 0.0;
-            let pos = screen_center + Vector2::new(x, y);
-
+        for (idx, pos) in self.font.render("Test String", screen_center) {
             batch.sprite_layer(&self.font.textures, idx, Xform2D::position(pos), color_white);
         }
 
