@@ -10,6 +10,8 @@ use crate::game::anim::*;
 use crate::game::file::*;
 use crate::game::screen::GameScreen;
 
+const COPYRIGHT_TEXT: &'static str = "Copyright © 1996-2001 Blizzard Entertainment";
+
 /// Game title screen
 /// First screen after the intro video and before the main menu
 #[derive(Debug)]
@@ -56,7 +58,7 @@ impl GameScreen for TitleScreen {
                 &image.pixels)?
         };
 
-        let font = Font::load(archive, FontSize::Size42, FontColor::Grey)?;
+        let font = Font::load(archive, FontSize::Size24, FontColor::Silver)?;
 
         Ok(Self {
             title,
@@ -94,8 +96,12 @@ impl GameScreen for TitleScreen {
 
         batch.sprite_layer(&self.logo_frames, frame as u32, Xform2D::position(pos), color_white);
 
-        for (idx, pos) in self.font.render("Test String", screen_center) {
-            batch.sprite_layer(&self.font.textures, idx, Xform2D::position(pos), color_white);
+        let text_width = self.font.get_width(COPYRIGHT_TEXT);
+        let text_offset = Vector2::new(((RENDER_WIDTH - text_width) / 2) as f32, 410.0);
+        let char_size = Vector2::new(24.0, 26.0);
+        let text_pos = (char_size*0.5) + text_offset;
+        for (index, pos) in self.font.render(COPYRIGHT_TEXT, text_pos) {
+            batch.sprite_layer(&self.font.textures, index as u32, Xform2D::position(pos), color_white);
         }
 
         if !self.fade_animation.is_done() {

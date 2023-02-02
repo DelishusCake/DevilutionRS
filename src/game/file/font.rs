@@ -91,6 +91,20 @@ impl Font {
         })
     }
 
+    pub fn get_width(&self, string: &str) -> u32 {
+        let mut w = 0;
+        for c in string.chars() {
+            let c = c as usize;
+            let advance_x = if self.bin[c + 2] != 0 {
+                self.bin[c + 2]
+            } else {
+                self.bin[0]
+            };
+            w = w + (advance_x as u32);
+        }
+        w
+    }
+
     pub fn render<'a>(&'a self, string: &'a str, pos: Vector2<f32>) -> FontStringItr {
         FontStringItr {
             chars: string.chars(),
