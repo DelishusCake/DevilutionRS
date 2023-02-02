@@ -22,4 +22,4 @@ Thanks to the following Open Source libraries and projects:
 ## Legal
 Diablo® - Copyright © 1996 Blizzard Entertainment, Inc. All rights reserved. Diablo and Blizzard Entertainment are trademarks or registered trademarks of Blizzard Entertainment, Inc. in the U.S. and/or other countries.
 
-DevilutionX and any of its maintainers are in no way associated with or endorsed by Blizzard Entertainment®.
+DevilutionRS and any of its maintainers are in no way associated with or endorsed by Blizzard Entertainment®.
