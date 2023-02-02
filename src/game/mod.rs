@@ -1,6 +1,6 @@
 pub mod anim;
+pub mod file;
 pub mod screen;
-pub mod screens;
 
 /// Game rendering constants
 pub const RENDER_WIDTH: u32 = 640;

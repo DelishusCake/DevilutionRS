@@ -8,7 +8,7 @@ use diablo::mpq::Archive;
 use diablo::gfx::*;
 use diablo::game::*;
 
-use diablo::game::screens::TitleScreen;
+use diablo::game::screen::TitleScreen;
 
 // Window constants
 pub const TITLE: &str = "Diablo";
@@ -57,12 +57,26 @@ fn main() -> anyhow::Result<()> {
     // TODO: Intro video
     let mut screen: Box<dyn GameScreen> = Box::new(TitleScreen::new(&diablo_mpq)?);
 
+    let mut frame_timer = 0.0;
+    let frame_rate = 1.0 / 60.0;
+
     let mut last_time = glfw.get_time();
     while !window.should_close() {
         // Calculate the delta time from last frame
         let now_time = glfw.get_time();
         let delta = now_time - last_time;
         last_time = now_time;
+        
+        frame_timer += delta;
+        while frame_timer >= frame_rate {
+            // Clear the batch
+            batch.clear();
+            // Update and render the current screen
+            screen.update_and_render(frame_rate, &mut batch);
+
+            frame_timer -= frame_rate;
+        }
+
         // Get the current window size and the rendering aspect ratio
         let window_size = window.get_framebuffer_size();
         let aspect_ratio = RENDER_WIDTH as f32 / RENDER_HEIGHT as f32;
@@ -75,12 +89,6 @@ fn main() -> anyhow::Result<()> {
             let ortho = ortho(0.0, window_size.0 as f32, window_size.1 as f32, 0.0, -1.0, 1.0);
             ortho*scale
         };
-        // Clear the batch
-        batch.clear();
-        {
-            // Update and render the current screen
-            screen.update_and_render(delta, &mut batch);
-        }
         // Flush the batch to the GPU
         batch.flush(projection);
 

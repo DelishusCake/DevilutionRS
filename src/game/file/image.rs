@@ -1,7 +1,7 @@
 use std::io::{Result, Error, ErrorKind, Cursor};
 
 use crate::mpq::File;
-use crate::gfx::util::*;
+use crate::gfx::*;
 
 #[derive(Debug)]
 pub struct Image {
@@ -46,6 +46,21 @@ impl Image {
         if let Some(_len) = reader.palette_length() {
             reader.read_palette(&mut palette)?;
         }
+        /*
+        NOTE: Test code to find the possible transparency index for an image.
+        Transparency is usually 250, but fonts seem to use other indices, depending.
+        
+        let mut i = 0;
+        while i < 256 {
+            let r = palette[i*3 + 0];
+            let g = palette[i*3 + 1];
+            let b = palette[i*3 + 2];
+            if r == 0 && g == 0xFF && b == 0 {
+                println!("{:?}", i);
+            }
+            i = i + 1;
+        }
+        */
         // Blit to the image pixels based on the palette and transparency
         unsafe {
             if let Some(transparency) = transparency {
@@ -70,6 +85,8 @@ impl Image {
     }
 }
 
+/*
+NOTE: Deprecated. TextureArray should be used instead.
 #[derive(Debug)]
 pub struct ImageArray {
     pub width: usize,
@@ -116,3 +133,4 @@ impl ImageArray {
         Ok(&self.image.pixels[offset..limit])
     }
 }
+*/

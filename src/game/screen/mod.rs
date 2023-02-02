@@ -1,3 +1,7 @@
+mod title;
+
+pub use title::*;
+
 use glfw::{Window, WindowEvent};
 
 use crate::gfx::Batch;
@@ -15,3 +19,4 @@ pub trait GameScreen {
     /// NOTE: Called within the rendering loop to update the game
     fn update_and_render(&mut self, delta: f64, batch: &mut Batch);
 }
+

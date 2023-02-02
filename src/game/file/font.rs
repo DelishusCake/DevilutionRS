@@ -1,6 +1,8 @@
 use anyhow::Context;
 
+use crate::gfx::*;
 use crate::mpq::Archive;
+use crate::game::file::Image;
 
 /*
 https://github.com/diasurgical/devilution/blob/master/DiabloUI/artfont.cpp
@@ -41,6 +43,17 @@ impl Into<i32> for FontSize {
     }
 }
 
+impl Into<f32> for FontSize {
+    fn into(self) -> f32 { 
+        match self {
+            FontSize::Size16 => 16.0,
+            FontSize::Size24 => 24.0,
+            FontSize::Size30 => 30.0,
+            FontSize::Size42 => 42.0,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum FontColor {
     Grey,
@@ -62,6 +75,7 @@ impl Into<char> for FontColor {
 pub struct Font {
     size: FontSize,
     color: FontColor,
+    pub textures: TextureArray,
 }
 
 impl Font {
@@ -78,16 +92,34 @@ impl Font {
             buf
         };
 
-        let _contents_pcx = {
-            let mut buf = vec![0x0u8; file_pcx.size()];
-            file_pcx.read(&mut buf)?;
-            buf
+        let textures = {
+            let layers = 256;
+            let alpha_index = 32;
+            let format = Format::R8g8b8a8_uint;
+            let filtering = Filtering::Nearest;
+            
+            let image = Image::read_pcx(&file_pcx, Some(alpha_index))?;
+
+            let (width, height) = image.dimensions();
+            let height = height / layers;
+
+            TextureArray::new(
+                width, height, layers, 
+                format, filtering, 
+                &image.pixels)?
         };
 
         Ok(Self {
             size,
-            color
+            color,
+            textures
         })
+    }
+
+    pub fn get_char_info(&self, c: char) -> (u32, f32) {
+        let index = 255 - c as u32;
+        let advance = self.size.into();
+        (index, advance)
     }
 }
 

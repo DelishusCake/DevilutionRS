@@ -7,6 +7,7 @@ use crate::gfx::*;
 
 use crate::game::*;
 use crate::game::anim::*;
+use crate::game::file::*;
 use crate::game::screen::GameScreen;
 
 /// Game title screen
@@ -15,6 +16,8 @@ use crate::game::screen::GameScreen;
 pub struct TitleScreen {
     title: Texture,
     logo_frames: TextureArray,
+
+    font: Font,
 
     logo_animation: LoopingTween<Frame>,
     fade_animation: OneShotTween<Frame>,
@@ -30,32 +33,36 @@ impl GameScreen for TitleScreen {
             let image = Image::read_pcx(&file, None)?;
 
             let (width, height) = image.dimensions();
-            let pixels = &image.pixels;
 
             Texture::new(
                 width, height, 
                 format, filtering,
-                pixels
-            )?
+                &image.pixels)?
         };
 
         let logo_frames = {
-            let file = archive.get_file("ui_art\\logo.pcx")?;
-            let image = Image::read_pcx(&file, Some(250))?;
-
             let layers = 15;
+            let alpha_index = 250;
+
+            let file = archive.get_file("ui_art\\logo.pcx")?;
+            let image = Image::read_pcx(&file, Some(alpha_index))?;
+
             let (width, height) = image.dimensions();
             let height = height / layers;
 
-            TextureArray::new(width, height, layers, format, filtering, &image.pixels)?
+            TextureArray::new(
+                width, height, layers, 
+                format, filtering, 
+                &image.pixels)?
         };
 
-        // let _font = Font::load(archive, FontSize::Size16, FontColor::Grey)?;
+        let font = Font::load(archive, FontSize::Size24, FontColor::Grey)?;
 
         Ok(Self {
             title,
             logo_frames,
-            fade_animation: OneShotTween::new(Frame(0), Frame(48), 2.0),
+            font,
+            fade_animation: OneShotTween::new(Frame(0), Frame(48), 1.0),
             logo_animation: LoopingTween::new(Frame(0), Frame(14), 1.0),
         })
     }
@@ -66,7 +73,7 @@ impl GameScreen for TitleScreen {
         match event {
             WindowEvent::Key(Key::Escape, _, Action::Press, _) => {
                 window.set_should_close(true)
-            }
+            },
             _ => {},
         }
     }
@@ -84,8 +91,19 @@ impl GameScreen for TitleScreen {
         let frame: usize = self.logo_animation.value().into();
         let frame = (self.logo_frames.layers - frame) - 1;
         let pos = Vector2::new(screen_center.x, RENDER_HEIGHT as f32 - 182.0);
-        
+
         batch.sprite_layer(&self.logo_frames, frame as u32, Xform2D::position(pos), color_white);
+
+        let mut x = 0.0;
+        for c in "Test String".chars() {
+            let (idx, advance) = self.font.get_char_info(c);
+
+            x = x + advance;
+            let y = 0.0;
+            let pos = screen_center + Vector2::new(x, y);
+
+            batch.sprite_layer(&self.font.textures, idx, Xform2D::position(pos), color_white);
+        }
 
         if !self.fade_animation.is_done() {
             let fade_alpha = 1.0 - self.fade_animation.percentage();
