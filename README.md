@@ -3,11 +3,15 @@ DevilutionRS
 An attempt to re-create the 1996 Blizzard classic *Diablo®* to rust, taking heavy inspiration from the [DevilutionX](https://github.com/diasurgical/devilutionX) project.
 
 ## Progress
- - [x] Reading MPQ archives
- - [x] Basic image rendering
- - [x] Displaying the title screen
- - [ ] Font rendering
- - [ ] MPQ writing (for save games)
+ - MPQ Files
+    - [x] Reading
+    - [ ] Writing (for save games)
+ - Rendering
+    - [x] Image
+    - [x] Font/text
+ - UI Screens
+    - [x] Title
+    - [ ] Main menu 
 
 ## Credits
 Thanks to the following Open Source libraries and projects:
