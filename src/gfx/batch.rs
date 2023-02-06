@@ -108,7 +108,7 @@ impl Batch {
 
     /// Draw a textured, colored quad using the specified transform
     /// TODO: Support specifying the portion of the texture to draw
-    pub fn sprite(&mut self, texture: &Texture, xform: Xform2D, color: Vector4<f32>) {
+    pub fn image(&mut self, texture: &Texture, xform: Xform2D, color: Vector4<f32>) {
         const INDEX_PATTERN: [usize;6] = [0, 1, 2, 0, 3, 2];
         
         let size = (texture.width as f32, texture.height as f32);
@@ -140,7 +140,7 @@ impl Batch {
 
     /// Draw a textured, colored quad using the specified transform
     /// TODO: Support specifying the portion of the texture to draw
-    pub fn sprite_layer(&mut self, texture: &TextureArray, layer: u32, xform: Xform2D, color: Vector4<f32>) {
+    pub fn sprite(&mut self, texture: &TextureArray, layer: u32, xform: Xform2D, color: Vector4<f32>) {
         const INDEX_PATTERN: [usize;6] = [0, 1, 2, 0, 3, 2];
         
         let size = (texture.width as f32, texture.height as f32);

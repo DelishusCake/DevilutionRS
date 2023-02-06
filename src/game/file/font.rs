@@ -59,12 +59,12 @@ impl Font {
         let (filename_bin, filename_pcx) = get_font_filenames(size, color)
             .context("Font size/color pair is invalid")?;
 
-        let file_bin = archive.get_file(&filename_bin).context("Failed to get binary file from archive")?;
-        let file_pcx = archive.get_file(&filename_pcx).context("Failed to get pcx file from archive")?;
-
         let bin = {
-            let mut buf = vec![0x0u8; file_bin.size()];
-            file_bin.read(&mut buf)?;
+            let file = archive.get_file(&filename_bin)
+                .context("Failed to get binary file from archive")?;
+            
+            let mut buf = vec![0x0u8; file.size()];
+            file.read(&mut buf)?;
             buf
         };
 
@@ -74,7 +74,9 @@ impl Font {
             let format = Format::R8g8b8a8_uint;
             let filtering = Filtering::Nearest;
             
-            let image = Image::read_pcx(&file_pcx, Some(alpha_index))?;
+            let file = archive.get_file(&filename_pcx)
+                .context("Failed to get pcx file from archive")?;
+            let image = Image::read_pcx(&file, Some(alpha_index))?;
 
             let (width, height) = image.dimensions();
             let height = height / layers;
@@ -91,16 +93,24 @@ impl Font {
         })
     }
 
+    /// Get the advance, in pixels, of a character in this font
+    pub fn get_advance_x(&self, c: char) -> u8 {
+        let c = c as usize;
+        // If the character has a value stored in the bin file
+        if self.bin[c + 2] != 0 {
+            // Return it
+            self.bin[c + 2]
+        } else {
+            // Otherwise return the whitespace width
+            self.bin[0]
+        }
+    }
+
+    /// Get the width of a string, if rendered in this font
     pub fn get_width(&self, string: &str) -> u32 {
         let mut w = 0;
         for c in string.chars() {
-            let c = c as usize;
-            let advance_x = if self.bin[c + 2] != 0 {
-                self.bin[c + 2]
-            } else {
-                self.bin[0]
-            };
-            w = w + (advance_x as u32);
+            w += self.get_advance_x(c) as u32;
         }
         w
     }
@@ -128,26 +138,15 @@ impl Iterator for FontStringItr<'_, '_> {
     fn next(&mut self) -> Option<Self::Item> {
         // Get the next character, or return none if the character iterator is now empty
         let c = self.chars.next()?;
-        // Get the character as a u32
-        let c = c as u32;
         // Match the character to handle non-ASCII characters
-        let (index, advance) = match c {
+        let (index, advance) = match c as u32 {
             // ASCII character range
             0..=255 => {
                 // Get the index into the texture array for this character
                 let index = 255 - c as u32;
                 // TODO: Newline characters
                 // Get the x advancement for this character
-                let advance_x = {
-                    // Lookup the character width in the bin file
-                    let char_w = self.font.bin[(c as u32 + 2) as usize];
-                    if char_w != 0 {
-                        char_w as i32
-                    } else {
-                        // No character width stored, use the default width
-                        self.font.bin[0] as i32
-                    }
-                };
+                let advance_x = self.font.get_advance_x(c);
                 (index, Vector2::new(advance_x as f32, 0.0))
             },
             _ => {

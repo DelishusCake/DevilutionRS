@@ -1,4 +1,4 @@
-use glfw::{WindowHint, OpenGlProfileHint};
+use glfw::{Window, WindowHint, WindowEvent, OpenGlProfileHint};
 
 use cgmath::*;
 use anyhow::Context;
@@ -8,7 +8,8 @@ use diablo::mpq::Archive;
 use diablo::gfx::*;
 use diablo::game::*;
 
-use diablo::game::screen::TitleScreen;
+use diablo::game::msg::*;
+use diablo::game::screen::*;
 
 // Window constants
 pub const TITLE: &str = "Diablo";
@@ -53,9 +54,11 @@ fn main() -> anyhow::Result<()> {
     // Initialize the rendering materials
     let materials = MaterialMap::new()?;
 
+    let mut msg_bus = MsgBus::new(1024);
+
     // Initialize at the title screen
     // TODO: Intro video
-    let mut screen: Box<dyn GameScreen> = Box::new(TitleScreen::new(&diablo_mpq)?);
+    let mut screen: Box<dyn GameScreen> = GameScreenName::Title.init(&diablo_mpq)?;
 
     let mut frame_timer = 0.0;
     let frame_rate = 1.0 / 60.0;
@@ -67,13 +70,15 @@ fn main() -> anyhow::Result<()> {
         let delta = now_time - last_time;
         last_time = now_time;
         
+        // Update the current screen at a fixed rate
         frame_timer += delta;
         while frame_timer >= frame_rate {
-            // Clear the batch
-            batch.clear();
-            // Update and render the current screen
-            screen.update_and_render(frame_rate, &mut batch);
-
+            // Update the game and check if a screen was returned to transition to 
+            if let Some(next_screen) = screen.update(&mut msg_bus, frame_rate) {
+                // Initialize the new screen
+                screen = next_screen.init(&diablo_mpq)?;
+            }
+            // Subtract the used time from the frame timer
             frame_timer -= frame_rate;
         }
 
@@ -89,6 +94,12 @@ fn main() -> anyhow::Result<()> {
             let ortho = ortho(0.0, window_size.0 as f32, window_size.1 as f32, 0.0, -1.0, 1.0);
             ortho*scale
         };
+        // Clear the batch
+        batch.clear();
+        {
+            // Render the current screen
+            screen.render(&mut batch);
+        }
         // Flush the batch to the GPU
         batch.flush(projection);
 
@@ -116,10 +127,26 @@ fn main() -> anyhow::Result<()> {
         glfw.poll_events();
         // Handle each event in the loop
         for (_, event) in glfw::flush_messages(&events) {
-            screen.handle_event(&mut window, &event);
+            handle_event(&mut window, &event, &mut msg_bus);
         }
     }
     Ok(())
+}
+
+fn handle_event(window: &mut Window, event: &WindowEvent, msg_bus: &mut MsgBus) {
+    use glfw::{Key, Action};
+
+    match event {
+        // Esc exits the game
+        WindowEvent::Key(Key::Escape, _, Action::Press, _) => {
+            window.set_should_close(true)
+        },
+        // Any other key event gets passed to the game via the message bus
+        WindowEvent::Key(key, _, action, _) => {
+            msg_bus.enqueue(Msg::Key(*key, *action));
+        }
+        _ => {},
+    }
 }
 
 /// Viewport structure for aspect-ratio correct rendering

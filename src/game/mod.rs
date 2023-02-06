@@ -1,3 +1,4 @@
+pub mod msg;
 pub mod anim;
 pub mod file;
 pub mod screen;
