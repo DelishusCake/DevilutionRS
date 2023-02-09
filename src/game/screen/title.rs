@@ -7,7 +7,7 @@ use crate::game::*;
 use crate::game::msg::*;
 use crate::game::anim::*;
 use crate::game::file::*;
-use crate::game::screen::{*, town::*};
+use crate::game::screen::*;
 
 const COPYRIGHT_TEXT: &'static str = "Copyright © 1996-2001 Blizzard Entertainment";
 

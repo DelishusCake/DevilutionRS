@@ -1,13 +1,12 @@
 use glfw::{Window, WindowHint, WindowEvent, OpenGlProfileHint};
 
 use cgmath::*;
+
 use anyhow::Context;
-use crate::screen::GameScreen;
 
 use diablo::mpq::Archive;
 use diablo::gfx::*;
 use diablo::game::*;
-
 use diablo::game::msg::*;
 use diablo::game::screen::*;
 
@@ -16,8 +15,10 @@ pub const TITLE: &str = "Diablo";
 pub const SCREEN_WIDTH: u32 = RENDER_WIDTH;
 pub const SCREEN_HEIGHT: u32 = RENDER_HEIGHT;
 // Rendering constants
+// TODO: Tune these as needed
 pub const MAX_INDICES: usize = 1024;
 pub const MAX_VERTICES: usize = 1024;
+pub const MAX_MESSAGES: usize = 1024;
 
 fn main() -> anyhow::Result<()> {
     use glfw::Context;
@@ -54,8 +55,8 @@ fn main() -> anyhow::Result<()> {
     // Initialize the rendering materials
     let materials = MaterialMap::new()?;
 
-    let mut msg_bus = MsgBus::new(1024);
-
+    // Initialize the message bus
+    let mut msg_bus = MsgBus::new(MAX_MESSAGES);
     // Initialize at the title screen
     // TODO: Intro video
     let mut screen: Box<dyn GameScreen> = GameScreenName::Title.init(&diablo_mpq)?;
