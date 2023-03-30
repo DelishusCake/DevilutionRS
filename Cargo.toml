@@ -1,26 +1,2 @@
-[package]
-name = "diablo"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-# Anyhow error handling library
-anyhow = "1"
-# GL library for OpenGL access 
-gl = "0.14"
-# GLFW for windowing/input handling
-glfw = "0.49"
-# PCX for reading/decoding PCX format images
-pcx = "0.2"
-# cgmath for all CPU-side linear algebra
-cgmath = "0.18.0"
-# BitFlags for bit-flag enums
-bitflags = "1.3"
-# ByteOrder library for parsing byte-level file structures
-byteorder = "1"
-# Memoffset for access to the C funciton offsetof
-memoffset = "0.8"
-# Explode library for access to the PKWARE (de)compression algorithm
-explode = "0.1"
+[workspace]
+members = ["game", "mpq", "gfx"]

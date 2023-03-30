@@ -1,0 +1,16 @@
+[package]
+name = "gfx"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# Anyhow error handling library
+anyhow = "1"
+# GL library for OpenGL access 
+gl = "0.14"
+# cgmath for all CPU-side linear algebra
+cgmath = "0.18.0"
+# Memoffset for access to the C funciton offsetof
+memoffset = "0.8"

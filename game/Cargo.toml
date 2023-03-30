@@ -1,0 +1,21 @@
+[package]
+name = "game"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# Anyhow error handling library
+anyhow = "1"
+# GL library for OpenGL access 
+gl = "0.14"
+# GLFW for windowing/input handling
+glfw = "0.49"
+# PCX for reading/decoding PCX format images
+pcx = "0.2"
+# cgmath for all CPU-side linear algebra
+cgmath = "0.18.0"
+
+mpq = { path = "../mpq" }
+gfx = { path = "../gfx" }
