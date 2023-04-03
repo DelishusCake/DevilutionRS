@@ -202,10 +202,16 @@ impl BlockEntry {
     }
 
     pub fn is_compressed(&self) -> bool {
+        if self.size_unpacked < self.size_packed {
+            return false;
+        }
         !(self.flags & BlockFlags::ANY_COMPRESSION).is_empty()
     }
 
     pub fn is_imploded(&self) -> bool {
+        if self.size_unpacked < self.size_packed {
+            return false;
+        }
         !(self.flags & BlockFlags::COMPRESS_PKWARE).is_empty()
     }
 
@@ -214,6 +220,9 @@ impl BlockEntry {
     }
 
     pub fn has_muli_compression(&self) -> bool {
+        if self.size_unpacked < self.size_packed {
+            return false;
+        }
         !(self.flags & BlockFlags::COMPRESS_MULTI).is_empty()
     }
 }

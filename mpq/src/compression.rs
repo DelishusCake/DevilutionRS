@@ -31,6 +31,14 @@ pub fn explode_into(data: &[u8], out: &mut [u8]) -> Result<usize> {
     for (dst, src) in out.into_iter().zip(buffer.iter()) {
         *dst = *src;
     }
-    // Return the number of bytes written
     Ok(buffer.len())
+}
+
+
+/// Direct copy one buffer into another
+pub fn copy_into(data: &[u8], out: &mut [u8]) -> Result<usize> {
+    for (dst, src) in out.into_iter().zip(data.iter()) {
+        *dst = *src;
+    }
+    Ok(data.len())
 }

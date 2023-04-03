@@ -11,7 +11,6 @@ use super::{compression, crypto};
 /// This is *not* intended as a complete implementation of the MPQ file format, just one usable enough for this project
 /// NOTE: Big thanks to the libmpq library by ge0rg
 /// https://github.com/ge0rg/libmpq/blob/master/libmpq/mpq-internal.h
-#[derive(Debug)]
 pub struct Archive {
     // Archive file handle
     file: fs::File,
@@ -134,6 +133,17 @@ impl Archive {
     }
 }
 
+impl std::fmt::Debug for Archive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Archive")
+            .field("file", &self.file)
+            .field("offset", &self.offset)
+            .field("sector_size", &self.sector_size)
+            .field("header", &self.header)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A handle pointing to a file stored in a MPQ Archive
 #[derive(Debug, Clone, Copy)]
 pub struct File<'a> {
@@ -145,7 +155,7 @@ pub struct File<'a> {
 impl<'a> File<'a> {
     /// Get the decompressed file size
     pub fn size(&self) -> usize {
-        self.block.size_unpacked as usize
+        std::cmp::max(self.block.size_packed, self.block.size_unpacked) as usize
     }
 
     /// Read the file into the out buffer. The out buffer must be large enough to hold the complete file.
@@ -153,7 +163,7 @@ impl<'a> File<'a> {
     /// This is because the whole file must be read at once, due to the way compression and encryption work.
     pub fn read(&self, out: &mut [u8]) -> Result<usize> {
         // Check that the file can be read into the supplied output buffer
-        if out.len() < self.block.size_unpacked as usize {
+        if out.len() < self.size() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "Output buffer not large enough for unpacked file",
@@ -180,7 +190,7 @@ impl<'a> File<'a> {
                 &mut file,
                 self.key,
                 offset,
-                self.block.size_unpacked as usize,
+                block.size_unpacked as usize,
                 self.archive.sector_size,
             )?;
             for (index, sector) in sectors.enumerate() {
@@ -204,7 +214,7 @@ impl<'a> File<'a> {
                 } else if block.has_muli_compression() {
                     compression::decompress_into(input, output)?
                 } else {
-                    todo!()
+                    compression::copy_into(input, output)?
                 };
             }
             Ok(bytes_written)
